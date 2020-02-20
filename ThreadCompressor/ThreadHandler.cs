@@ -10,11 +10,11 @@ namespace ThreadCompressor
         /// <summary>
         /// Флаг на работу потока
         /// </summary>
-        private bool work;
+        private bool IsWork;
         /// <summary>
         /// Поток обработки.
         /// </summary>
-        private Thread thread;
+        private Thread Thread;
         /// <summary>
         /// Исходный размер блока
         /// </summary>
@@ -38,23 +38,23 @@ namespace ThreadCompressor
         public byte[] OutputData;
 
         /// <summary>
-        /// Созает обработчик, и запускает поток обработки данных.
+        /// Создает обработчик, и запускает поток обработки данных.
         /// </summary>
         /// <param name="Mode">Режим обработки</param>
         /// <param name="BlockSize">Размер блока на компрессию</param>
         public ThreadHandler(CompressionMode Mode, int BlockSize = 1024/1024)
         {
             if (BlockSize < 1024) throw new Exception("Размер блока не может быть меньше 1024 байт");
-            work = true;
+            IsWork = true;
             this.Mode = Mode;
             this.BlockSize = BlockSize;
-            thread = new Thread(Work);
-            thread.Start();
+            Thread = new Thread(Work);
+            Thread.Start();
         }
 
         private void Work()
         {
-            while (work)
+            while (IsWork)
             {
                 if (InputData != null) 
                 {
@@ -95,7 +95,7 @@ namespace ThreadCompressor
         /// </summary>
         public void Stop()
         {
-            work = false;
+            IsWork = false;
         }
 
         /// <summary>

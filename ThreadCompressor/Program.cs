@@ -1,9 +1,5 @@
 ﻿using System;
-using System.Diagnostics;
-using System.IO;
 using System.IO.Compression;
-using System.Security.Cryptography;
-using System.Threading;
 
 namespace ThreadCompressor
 {
@@ -25,8 +21,6 @@ namespace ThreadCompressor
             }
             else res = "Неверно заданы аргументы.";
             
-            //Thread.Sleep(2000);
-            //res = new GzWorker("1.resS.cgz", "1.resS").Start(CompressionMode.Decompress);
             Console.WriteLine(string.IsNullOrEmpty(res) ? "OK" : res);
             Console.ReadKey();
             return string.IsNullOrEmpty(res) ? 0 : 1;
