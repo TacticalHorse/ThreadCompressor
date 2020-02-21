@@ -164,6 +164,7 @@ namespace ThreadCompressor
         /// <returns></returns>
         private bool IsVerifyFile(string Filename, byte[] OriginalHash)
         {
+            Console.WriteLine("Проверяем целостность файла.");
             var NewFileHash = CalculateMD5(Filename);
             for (int i = 0; i < NewFileHash.Length; i++)
             {

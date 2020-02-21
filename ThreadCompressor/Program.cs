@@ -7,6 +7,7 @@ namespace ThreadCompressor
     {
         static int Main(string[] args)
         {
+            Console.Clear();
             string res = "";
             if (args.Length == 3)
             {
@@ -22,7 +23,6 @@ namespace ThreadCompressor
             else res = "Неверно заданы аргументы.";
             
             Console.WriteLine(string.IsNullOrEmpty(res) ? "OK" : res);
-            Console.ReadKey();
             return string.IsNullOrEmpty(res) ? 0 : 1;
         }
     }
