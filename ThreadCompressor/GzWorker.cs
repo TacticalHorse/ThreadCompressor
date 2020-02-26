@@ -2,6 +2,7 @@
 using System.Diagnostics;
 using System.IO;
 using System.IO.Compression;
+using System.Linq;
 using System.Threading;
 
 namespace ThreadCompressor
@@ -31,7 +32,7 @@ namespace ThreadCompressor
         private double _Progress;                   //Текущий прогресс
 
         private ThreadHandler[] ThreadPool;         //Пул потоков.
-        private Thread ThreadPoolMaster;
+        private Thread ThreadPoolMaster;            //Поток для назначения задач ThreadHandler'ам. На случай если доступных процессоров много.
 
         private string InputFileName;               //Имя исходного файла.
         private string OutputFileName;              //Имя выходного файла.
@@ -62,7 +63,7 @@ namespace ThreadCompressor
         /// <param name="OutputFileName">Имя выходного файла.</param>
         public GzWorker(string InputFileName, string OutputFileName)
         {
-            BlockSize = 1048576*2;
+            BlockSize = 1048576*3;
             this.InputFileName = InputFileName;
             this.OutputFileName = OutputFileName;
         }
@@ -85,42 +86,26 @@ namespace ThreadCompressor
                         if (CompressionMode == CompressionMode.Decompress)
                         {
                             ParseFileHeader(ref BlockCount, ref BlockSize, SR);
+                            CheckFreeSpaceForDecompress(BlockSize, BlockCount, OutputFileName);
                         }
-                        else
-                        {
-                            CreateFileHeader(ref BlockCount, BlockSize, InputFileName, SW);
-                        }
+                        else CreateFileHeader(ref BlockCount, BlockSize, InputFileName, SW);
 
                         CreateHandlers(BlockSize, CompressionMode, ref ThreadPool, ref ThreadPoolMaster);
 
                         InputData = new byte[BlockCount][];
                         OutputData = new byte[BlockCount][];
+
                         ThreadPoolMaster?.Start();
+
                         while (WriteBlockIndex != BlockCount)
                         {
                             LoadData(ref ReadBlockIndex, ProcessedCount, BlockSize, BlockCount, InputFileName, CompressionMode, SR, ThreadPool, InputData);
-
-                            if(ThreadPoolMaster!= null)
-                            {
-                                for (int i = 0; i < ThreadPool.Length; i++)
-                                {
-                                    CollectResult(ref ProcessedCount, ThreadPool[i], OutputData);
-                                    SetWork(ref CurrentBlockIndex, ReadBlockIndex, ThreadPool[i], InputData);
-                                }
-                            }
-
+                            if(ThreadPoolMaster == null) ThreadHandlerCycle(ref CurrentBlockIndex, ReadBlockIndex, ref ProcessedCount, InputData, OutputData, ThreadPool); 
                             WriteResultInFile(ref WriteBlockIndex, CurrentBlockIndex, SW, OutputData, CompressionMode);
-
 
                             Progress = Math.Round((double)WriteBlockIndex / (double)BlockCount * 100,1);
                             Thread.Sleep(1);
                             GC.Collect();
-                        }
-
-                        for (int i = 0; i < ThreadPool.Length; i++)
-                        {
-                            ThreadPool[i].Stop();
-                            ThreadPool[i] = null;
                         }
                     }
                 }
@@ -130,26 +115,47 @@ namespace ThreadCompressor
             {
                 return ex.Message;
             }
+            finally
+            {
+                if (ThreadPool != null)
+                {
+                    for (int i = 0; i < ThreadPool.Length; i++)
+                    {
+                        ThreadPool[i]?.Stop();
+                        ThreadPool[i] = null;
+                    }
+                }
+                InputData = null;
+                OutputData = null;
+                GC.Collect();
+            }
         }
 
-        void ThreadPoolMasterWork()
+
+        /// <summary>
+        /// Рабочий метод для <see cref="ThreadPoolMaster"/>
+        /// </summary>
+        private void ThreadPoolMasterWork()
         {
             while (WriteBlockIndex != BlockCount)
             {
-                for (int i = 0; i < ThreadPool.Length; i++)
-                {
-                    CollectResult(ref ProcessedCount, ThreadPool[i], OutputData);
-                    SetWork(ref CurrentBlockIndex, ReadBlockIndex, ThreadPool[i], InputData);
-                }
+                ThreadHandlerCycle(ref CurrentBlockIndex, ReadBlockIndex, ref ProcessedCount, InputData, OutputData, ThreadPool);
                 Thread.Sleep(1);
             }
+        }
 
+        /// <summary>
+        /// Цикл на работу с потоками в <see cref="ThreadPool"/>.
+        /// </summary>
+        private void ThreadHandlerCycle(ref int CurrentBlockIndex, int ReadBlockIndex, ref int ProcessedCount, byte[][] InputData, byte[][] OutputData, ThreadHandler[] ThreadPool)
+        {
             for (int i = 0; i < ThreadPool.Length; i++)
             {
-                ThreadPool[i].Stop();
-                ThreadPool[i] = null;
+                CollectResult(ref ProcessedCount, ThreadPool[i], OutputData);
+                SetWork(ref CurrentBlockIndex, ReadBlockIndex, ThreadPool[i], InputData);
             }
         }
+
 
         /// <summary>
         /// Создаем пул потоков в зависимости от количества процессоров
@@ -159,13 +165,12 @@ namespace ThreadCompressor
         /// <param name="ThreadPool">Пул потоков.</param>
         private void CreateHandlers(int BlockSize, CompressionMode CompressionMode, ref ThreadHandler[] ThreadPool, ref Thread ThreadPoolMaster)
         {
-            if (Environment.ProcessorCount > 4)
-            { 
-                ThreadPool = new ThreadHandler[Environment.ProcessorCount - 1];// Один резервим для основного потока.
+            if (Environment.ProcessorCount > 2)
+            {
+                ThreadPool = new ThreadHandler[(int)(Environment.ProcessorCount * 1.2)];
                 ThreadPoolMaster = new Thread(new ThreadStart(ThreadPoolMasterWork));
             }
-            else
-                ThreadPool = new ThreadHandler[4];
+            else ThreadPool = new ThreadHandler[4];
             for (int i = 0; i < ThreadPool.Length; i++)
             {
                 ThreadPool[i] = new ThreadHandler(CompressionMode, BlockSize);
@@ -183,8 +188,10 @@ namespace ThreadCompressor
             byte[] data = new byte[4];
             StreamReader.Read(data, 0, 4);
             BlockSize = BitConverter.ToInt32(data, 0);
+            if (BlockSize < 1) throw new Exception("Файл поврежден.");
             StreamReader.Read(data, 0, 4);
             BlockCount = BitConverter.ToInt32(data, 0);
+            if (BlockCount < 1) throw new Exception("Файл поврежден.");
         }
 
         /// <summary>
@@ -208,7 +215,7 @@ namespace ThreadCompressor
         /// <returns>Возвращает true в случае необходимости в новой информации.</returns>
         private bool NeedMoreBlocks(int ReadBlockIndex, int ProcessedCount, ThreadHandler[] ThreadPool)
         {
-            return ReadBlockIndex < (ProcessedCount + ThreadPool.Length * 2);
+            return ReadBlockIndex < (ProcessedCount + ThreadPool.Length);
         }
 
         /// <summary>
@@ -227,11 +234,14 @@ namespace ThreadCompressor
         /// <param name="inputdata">Массив данных на обработку</param>
         private void LoadCompressedBlock(ref int ReadBlockIndex, FileStream StreamReader, byte[][] inputdata)
         {
-            var sizedata = new byte[4];
+            byte[] sizedata = new byte[4];
+            Stopwatch sw = Stopwatch.StartNew();
             StreamReader.Read(sizedata, 0, 4);
             int size = BitConverter.ToInt32(sizedata, 0);
-            var arr = new byte[size];
+            byte[] arr = new byte[size];
+            sw.Restart();
             StreamReader.Read(arr, 0, size);
+            sw.Restart();
             inputdata[ReadBlockIndex] = arr;
             ReadBlockIndex++;
         }
@@ -266,7 +276,7 @@ namespace ThreadCompressor
         {
             if (NeedMoreBlocks(ReadBlockIndex, ProcessedCount, ThreadPool))
             {
-                for (int i = 0; i < ThreadPool.Length * 2; i++)
+                for (int i = 0; i < ThreadPool.Length * 1.5; i++)
                 {
                     if (ReadBlockIndex < BlockCount)
                     {
@@ -347,6 +357,19 @@ namespace ThreadCompressor
                 OutputData[WriteBlockIndex] = null;
                 WriteBlockIndex++;
             }
+        }
+
+        /// <summary>
+        /// Проверяет свободное наличие свободного места на диске для целевого файла
+        /// </summary>
+        /// <param name="BlockSize">Размер блока исходного файла.</param>
+        /// <param name="BlockCount">Количество блоков в файле.</param>
+        /// <param name="OutputFileName">Имя выходного файла.</param>
+        private void CheckFreeSpaceForDecompress(int BlockSize, int BlockCount, string OutputFileName)
+        {
+            var Drive = DriveInfo.GetDrives().Where(x => x.Name == Path.GetPathRoot(new FileInfo(OutputFileName).FullName)).FirstOrDefault();
+            if (Drive!= null && Drive.AvailableFreeSpace < (long)BlockSize * (long)BlockCount)
+                throw new Exception("Недостаточно места на жестком диске для распаковки.");
         }
     }
 }
