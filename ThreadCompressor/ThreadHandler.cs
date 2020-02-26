@@ -42,7 +42,7 @@ namespace ThreadCompressor
         /// </summary>
         /// <param name="Mode">Режим обработки</param>
         /// <param name="BlockSize">Размер блока на компрессию</param>
-        public ThreadHandler(CompressionMode Mode, int BlockSize = 1024/1024)
+        public ThreadHandler(CompressionMode Mode, int BlockSize = 1024*1024)
         {
             if (BlockSize < 1024) throw new Exception("Размер блока не может быть меньше 1024 байт");
             IsWork = true;
@@ -66,12 +66,9 @@ namespace ThreadCompressor
                             {
                                 gzstream.Write(InputData, 0, InputData.Length);
                             }
-                            OutputData = Output.GetBuffer();
+                            //Для сжатого участка отрезаем пустые байты
+                            OutputData = CutEmptyPart(Output.GetBuffer());
                         }
-                        //Для сжатого участка отрезаем пустые байты
-                        CutEmptyPart(ref OutputData);
-                        //И добавляем его размер
-                        AddCustomHead(ref OutputData);
                     }
                     else
                     {
@@ -83,7 +80,6 @@ namespace ThreadCompressor
                         }
                         if (ReadedBytes != BlockSize) Array.Resize(ref OutputData, ReadedBytes); //Потому подтверждаем размер блока
                     }
-
                     InputData = null;
                 }
                 else Thread.Sleep(1);
@@ -101,23 +97,13 @@ namespace ThreadCompressor
         /// <summary>
         /// Срезаем хвосты блоков
         /// </summary>
-        /// <param name="input"></param>
-        private void CutEmptyPart(ref byte[] input)
+        /// <param name="Input"></param>
+        /// <returns>Стриженый массив.</returns>
+        private byte[] CutEmptyPart(byte[] Input)
         {
-            int index = IndexOfFileTale(input);
-            if (index > -1) Array.Resize(ref input, index);
-        }
-
-        /// <summary>
-        /// Добавляет длинну в байтах перед. [GZBlock.Length][GZBlock]
-        /// </summary>
-        /// <param name="GZBlock"></param>
-        private void AddCustomHead(ref byte[] GZBlock)
-        {
-            byte[] intBytes = BitConverter.GetBytes(GZBlock.Length);
-            Array.Resize(ref intBytes, GZBlock.Length + 4);
-            Array.Copy(GZBlock, 0, intBytes, 4, GZBlock.Length);
-            GZBlock = intBytes;
+            int Index = IndexOfFileTale(Input);
+            if (Index > -1) Array.Resize(ref Input, Index);
+            return Input;
         }
 
         /// <summary>
