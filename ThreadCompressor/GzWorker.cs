@@ -91,21 +91,23 @@ namespace ThreadCompressor
                             CreateFileHeader(ref BlockCount, BlockSize, InputFileName, SW);
                         }
 
-                        CreateHandlers(BlockSize, CompressionMode, ref ThreadPool);
+                        CreateHandlers(BlockSize, CompressionMode, ref ThreadPool, ref ThreadPoolMaster);
 
                         InputData = new byte[BlockCount][];
                         OutputData = new byte[BlockCount][];
-                        ThreadPoolMaster = new Thread(new ThreadStart(ThreadPoolMasterWork));
-                        ThreadPoolMaster.Start();
+                        ThreadPoolMaster?.Start();
                         while (WriteBlockIndex != BlockCount)
                         {
                             LoadData(ref ReadBlockIndex, ProcessedCount, BlockSize, BlockCount, InputFileName, CompressionMode, SR, ThreadPool, InputData);
 
-                            //for (int i = 0; i < ThreadPool.Length; i++)
-                            //{
-                            //    CollectResult(ref ProcessedCount, ThreadPool[i], OutputData);
-                            //    SetWork(ref CurrentBlockIndex, ReadBlockIndex, ThreadPool[i], InputData);
-                            //}
+                            if(ThreadPoolMaster!= null)
+                            {
+                                for (int i = 0; i < ThreadPool.Length; i++)
+                                {
+                                    CollectResult(ref ProcessedCount, ThreadPool[i], OutputData);
+                                    SetWork(ref CurrentBlockIndex, ReadBlockIndex, ThreadPool[i], InputData);
+                                }
+                            }
 
                             WriteResultInFile(ref WriteBlockIndex, CurrentBlockIndex, SW, OutputData, CompressionMode);
 
@@ -155,10 +157,13 @@ namespace ThreadCompressor
         /// <param name="BlockSize">Размер блока исходного файла.</param>
         /// <param name="CompressionMode">Упаковка/Распаковка.</param>
         /// <param name="ThreadPool">Пул потоков.</param>
-        private void CreateHandlers(int BlockSize, CompressionMode CompressionMode, ref ThreadHandler[] ThreadPool)
+        private void CreateHandlers(int BlockSize, CompressionMode CompressionMode, ref ThreadHandler[] ThreadPool, ref Thread ThreadPoolMaster)
         {
             if (Environment.ProcessorCount > 4)
+            { 
                 ThreadPool = new ThreadHandler[Environment.ProcessorCount - 1];// Один резервим для основного потока.
+                ThreadPoolMaster = new Thread(new ThreadStart(ThreadPoolMasterWork));
+            }
             else
                 ThreadPool = new ThreadHandler[4];
             for (int i = 0; i < ThreadPool.Length; i++)
