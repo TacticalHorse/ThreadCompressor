@@ -276,7 +276,7 @@ namespace ThreadCompressor
         {
             if (NeedMoreBlocks(ReadBlockIndex, ProcessedCount, ThreadPool))
             {
-                for (int i = 0; i < ThreadPool.Length * 1.5; i++)
+                for (int i = 0; i < ThreadPool.Length * 1.5; i++)//читаем с запасом
                 {
                     if (ReadBlockIndex < BlockCount)
                     {
@@ -288,7 +288,7 @@ namespace ThreadCompressor
                         {
                             if (IsLastBlock(ReadBlockIndex, BlockCount))
                             {
-                                int lastblocksize = (int)(new FileInfo(InputFileName).Length - ReadBlockIndex * BlockSize);
+                                int lastblocksize = (int)(new FileInfo(InputFileName).Length - ReadBlockIndex * BlockSize); //тк последний блок может отличаться от заданного размера(BlockSize), вычисляем размеры.
                                 LoadBlock(ref ReadBlockIndex, lastblocksize, StreamReader, InputData);
                             }
                             else
