@@ -28,14 +28,20 @@ namespace ThreadCompressor
         /// Индекс обрабатываемого блока
         /// </summary>
         public long Index = -1;
-        /// <summary>
-        /// Данные на обаботку.
-        /// </summary>
-        public byte[] InputData;
-        /// <summary>
-        /// Обработанные данные.
-        /// </summary>
-        public byte[] OutputData;
+
+        public byte[] Data;
+
+
+        ///// <summary>
+        ///// Данные на обаботку.
+        ///// </summary>
+        //public byte[] InputData;
+        ///// <summary>
+        ///// Обработанные данные.
+        ///// </summary>
+        //public byte[] OutputData;
+
+        public AutoResetEvent AutoResetEvent;
 
         /// <summary>
         /// Создает обработчик, и запускает поток обработки данных.
@@ -56,33 +62,40 @@ namespace ThreadCompressor
         {
             while (IsWork)
             {
-                if (InputData != null) 
-                {
+                //if (InputData != null) 
+                //{
                     if (Mode == CompressionMode.Compress)
                     {
                         using (MemoryStream Output = new MemoryStream())
                         {
                             using (GZipStream gzstream = new GZipStream(Output, CompressionMode.Compress))
                             {
-                                gzstream.Write(InputData, 0, InputData.Length);
+                                //gzstream.Write(InputData, 0, InputData.Length);
+                                gzstream.Write(Data, 0, Data.Length);
                             }
                             //Для сжатого участка отрезаем пустые байты
-                            OutputData = CutEmptyPart(Output.GetBuffer());
+                            //OutputData = CutEmptyPart(Output.GetBuffer());
+                            Data = CutEmptyPart(Output.GetBuffer());
                         }
                     }
                     else
                     {
-                        OutputData = new byte[BlockSize];
+                        byte []CompressedData = new byte[BlockSize];
+                        Array.Copy(Data, CompressedData, Data.Length);
+                        //OutputData = new byte[BlockSize];
                         int ReadedBytes = 0; //Размер последнего блока будет отличаться от BlockSize
-                        using (GZipStream gzstream = new GZipStream(new MemoryStream(InputData), CompressionMode.Decompress))
+                        //using (GZipStream gzstream = new GZipStream(new MemoryStream(InputData), CompressionMode.Decompress))
+                        using (GZipStream gzstream = new GZipStream(new MemoryStream(Data), CompressionMode.Decompress))
                         {
-                            ReadedBytes = gzstream.Read(OutputData, 0, OutputData.Length);
+                            //ReadedBytes = gzstream.Read(OutputData, 0, OutputData.Length);
+                            ReadedBytes = gzstream.Read(Data, 0, Data.Length);
                         }
-                        if (ReadedBytes != BlockSize) Array.Resize(ref OutputData, ReadedBytes); //Потому подтверждаем размер блока
+                        //if (ReadedBytes != BlockSize) Array.Resize(ref OutputData, ReadedBytes); //Потому подтверждаем размер блока
+                        if (ReadedBytes != BlockSize) Array.Resize(ref Data, ReadedBytes); //Потому подтверждаем размер блока
                     }
-                    InputData = null;
-                }
-                else Thread.Sleep(1);
+                //    InputData = null;
+                //}
+                /*else */AutoResetEvent.WaitOne();
             }
         }
 

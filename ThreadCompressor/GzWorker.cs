@@ -63,7 +63,7 @@ namespace ThreadCompressor
         /// <param name="OutputFileName">Имя выходного файла.</param>
         public GzWorker(string InputFileName, string OutputFileName)
         {
-            BlockSize = 1048576*3;
+            BlockSize = 1048576;
             this.InputFileName = InputFileName;
             this.OutputFileName = OutputFileName;
         }
@@ -82,7 +82,6 @@ namespace ThreadCompressor
                 {
                     using (FileStream SW = File.Create(OutputFileName))
                     {
-
                         if (CompressionMode == CompressionMode.Decompress)
                         {
                             ParseFileHeader(ref BlockCount, ref BlockSize, SR);
@@ -105,7 +104,7 @@ namespace ThreadCompressor
 
                             Progress = Math.Round((double)WriteBlockIndex / (double)BlockCount * 100,1);
                             Thread.Sleep(1);
-                            GC.Collect();
+                            //GC.Collect();
                         }
                     }
                 }
@@ -127,7 +126,7 @@ namespace ThreadCompressor
                 }
                 InputData = null;
                 OutputData = null;
-                GC.Collect();
+                //GC.Collect();
             }
         }
 
@@ -335,6 +334,7 @@ namespace ThreadCompressor
                     Handler.InputData = InputData[CurrentBlockIndex];
                     InputData[CurrentBlockIndex] = null;
                     CurrentBlockIndex++;
+                    Handler.AutoResetEvent.Set();
                 }
             }
         }
