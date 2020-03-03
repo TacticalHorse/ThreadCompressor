@@ -154,7 +154,7 @@ namespace ThreadCompressor
             while (WriteBlockIndex != BlockCount)
             {
                 ThreadHandlerCycle(ref CurrentBlockIndex, ReadBlockIndex, ref ProcessedCount, DataFragments, ThreadPool);
-                Thread.Sleep(1);
+                ThreadHandler.GetDataPLS.WaitOne(200);
             }
         }
 
@@ -181,7 +181,7 @@ namespace ThreadCompressor
         {
             //if (Environment.ProcessorCount > 2)
             //{
-                ThreadPool = new ThreadHandler[(int)(Environment.ProcessorCount * 1.2)];
+                ThreadPool = new ThreadHandler[(int)(Environment.ProcessorCount)];
             //}
             //else ThreadPool = new ThreadHandler[4];
             for (int i = 0; i < ThreadPool.Length; i++)
@@ -229,7 +229,7 @@ namespace ThreadCompressor
         /// <returns>Возвращает true в случае необходимости в новой информации.</returns>
         private bool NeedMoreBlocks(int ReadBlockIndex, int ProcessedCount, ThreadHandler[] ThreadPool)
         {
-            return ReadBlockIndex < (ProcessedCount + ThreadPool.Length * 1.5);
+            return ReadBlockIndex < (ProcessedCount + ThreadPool.Length * 2.5);
         }
 
         /// <summary>
@@ -340,26 +340,27 @@ namespace ThreadCompressor
             {
                 //for (int i = 0; i < ThreadPool.Length/2 ; i++)//читаем с запасом
                 //{
-                    if (ReadBlockIndex < BlockCount)
+                if (ReadBlockIndex < BlockCount)
+                {
+                    if (CompressionMode == CompressionMode.Decompress)
                     {
-                        if (CompressionMode == CompressionMode.Decompress)
+                        //LoadCompressedBlock(ref ReadBlockIndex, StreamReader, InputData);
+                        LoadCompressedBlock(ref ReadBlockIndex, StreamReader, InputData);
+                    }
+                    else
+                    {
+                        if (IsLastBlock(ReadBlockIndex, BlockCount))
                         {
-                            //LoadCompressedBlock(ref ReadBlockIndex, StreamReader, InputData);
-                            LoadCompressedBlock(ref ReadBlockIndex, StreamReader, InputData);
+                            int lastblocksize = (int)(new FileInfo(InputFileName).Length - ReadBlockIndex * BlockSize); //тк последний блок может отличаться от заданного размера(BlockSize), вычисляем размеры.
+                            LoadBlock(ref ReadBlockIndex, lastblocksize, StreamReader, InputData);
                         }
                         else
                         {
-                            if (IsLastBlock(ReadBlockIndex, BlockCount))
-                            {
-                                int lastblocksize = (int)(new FileInfo(InputFileName).Length - ReadBlockIndex * BlockSize); //тк последний блок может отличаться от заданного размера(BlockSize), вычисляем размеры.
-                                LoadBlock(ref ReadBlockIndex, lastblocksize, StreamReader, InputData);
-                            }
-                            else
-                            {
-                                LoadBlock(ref ReadBlockIndex, BlockSize, StreamReader, InputData);
-                            }
+                            LoadBlock(ref ReadBlockIndex, BlockSize, StreamReader, InputData);
                         }
                     }
+                }
+                else break;
                 //}
             }
         }
@@ -460,7 +461,7 @@ namespace ThreadCompressor
                     DataFragments[WriteBlockIndex] = null;
                     WriteBlockIndex++;
                 }
-                Thread.Sleep(5);
+                Thread.Sleep(1);
             }
         }
 

@@ -33,6 +33,8 @@ namespace ThreadCompressor
 
         public AutoResetEvent AutoResetEvent;
 
+        public static AutoResetEvent GetDataPLS = new AutoResetEvent(false);
+
 
         ///// <summary>
         ///// Данные на обаботку.
@@ -78,7 +80,7 @@ namespace ThreadCompressor
                         //Для сжатого участка отрезаем пустые байты
                         //OutputData = CutEmptyPart(Output.GetBuffer());
                             DataFragment.Data = /*Output.GetBuffer();//*/ CutEmptyPart(Output.GetBuffer());
-                        }
+                    }
                     }
                     else
                     {
@@ -96,6 +98,7 @@ namespace ThreadCompressor
                         DataFragment.Data = DecompressedData;
                     }
                     DataFragment.IsProcessed = true;
+                GetDataPLS.Set();
                 //    InputData = null;
                 //}
                 /*else */AutoResetEvent.WaitOne();

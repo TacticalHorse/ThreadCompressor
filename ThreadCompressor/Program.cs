@@ -35,7 +35,7 @@ namespace ThreadCompressor
             Console.WriteLine(SW.Elapsed);
             Console.WriteLine(a.skipcounter);
 
-
+            Console.Read();
             return string.IsNullOrEmpty(res) ? 0 : 1;
 
             //Random rnd = new Random();
