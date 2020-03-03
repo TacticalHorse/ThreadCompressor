@@ -29,7 +29,9 @@ namespace ThreadCompressor
         /// </summary>
         public long Index = -1;
 
-        public byte[] Data;
+        public DataFragment DataFragment;
+
+        public AutoResetEvent AutoResetEvent;
 
 
         ///// <summary>
@@ -40,8 +42,6 @@ namespace ThreadCompressor
         ///// Обработанные данные.
         ///// </summary>
         //public byte[] OutputData;
-
-        public AutoResetEvent AutoResetEvent;
 
         /// <summary>
         /// Создает обработчик, и запускает поток обработки данных.
@@ -54,12 +54,14 @@ namespace ThreadCompressor
             IsWork = true;
             this.Mode = Mode;
             this.BlockSize = BlockSize;
+            AutoResetEvent = new AutoResetEvent(false);
             Thread = new Thread(Work);
             Thread.Start();
         }
 
         private void Work()
         {
+            AutoResetEvent.WaitOne();
             while (IsWork)
             {
                 //if (InputData != null) 
@@ -71,28 +73,29 @@ namespace ThreadCompressor
                             using (GZipStream gzstream = new GZipStream(Output, CompressionMode.Compress))
                             {
                                 //gzstream.Write(InputData, 0, InputData.Length);
-                                gzstream.Write(Data, 0, Data.Length);
+                                gzstream.Write(DataFragment.Data, 0, DataFragment.Data.Length);
                             }
-                            //Для сжатого участка отрезаем пустые байты
-                            //OutputData = CutEmptyPart(Output.GetBuffer());
-                            Data = CutEmptyPart(Output.GetBuffer());
+                        //Для сжатого участка отрезаем пустые байты
+                        //OutputData = CutEmptyPart(Output.GetBuffer());
+                            DataFragment.Data = /*Output.GetBuffer();//*/ CutEmptyPart(Output.GetBuffer());
                         }
                     }
                     else
                     {
-                        byte []CompressedData = new byte[BlockSize];
-                        Array.Copy(Data, CompressedData, Data.Length);
+                        byte []DecompressedData = new byte[BlockSize];
                         //OutputData = new byte[BlockSize];
                         int ReadedBytes = 0; //Размер последнего блока будет отличаться от BlockSize
                         //using (GZipStream gzstream = new GZipStream(new MemoryStream(InputData), CompressionMode.Decompress))
-                        using (GZipStream gzstream = new GZipStream(new MemoryStream(Data), CompressionMode.Decompress))
+                        using (GZipStream gzstream = new GZipStream(new MemoryStream(DecompressedData), CompressionMode.Decompress))
                         {
                             //ReadedBytes = gzstream.Read(OutputData, 0, OutputData.Length);
-                            ReadedBytes = gzstream.Read(Data, 0, Data.Length);
+                            ReadedBytes = gzstream.Read(DataFragment.Data, 0, DataFragment.Data.Length);
                         }
                         //if (ReadedBytes != BlockSize) Array.Resize(ref OutputData, ReadedBytes); //Потому подтверждаем размер блока
-                        if (ReadedBytes != BlockSize) Array.Resize(ref Data, ReadedBytes); //Потому подтверждаем размер блока
+                        if (ReadedBytes != BlockSize) Array.Resize(ref DecompressedData, ReadedBytes); //Потому подтверждаем размер блока
+                        DataFragment.Data = DecompressedData;
                     }
+                    DataFragment.IsProcessed = true;
                 //    InputData = null;
                 //}
                 /*else */AutoResetEvent.WaitOne();
