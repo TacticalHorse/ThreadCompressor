@@ -45,7 +45,7 @@ namespace ThreadCompressor
 
         private CompressionMode CompressionMode;
 
-        public int skipcounter;
+        private static object GetDataLocker = new object();
 
         /// <summary>
         /// Индикация прогресса.
@@ -104,7 +104,7 @@ namespace ThreadCompressor
                         //InputData = new byte[BlockCount][];
                         //OutputData = new byte[BlockCount][];
 
-                        ThreadPoolMaster.Start();
+                        //ThreadPoolMaster.Start();
                         rec.Start(SW);
 
                         while (WriteBlockIndex != BlockCount)
@@ -134,7 +134,7 @@ namespace ThreadCompressor
                     for (int i = 0; i < ThreadPool.Length; i++)
                     {
                         ThreadPool[i]?.Stop();
-                        ThreadPool[i].AutoResetEvent.Set();
+                        //ThreadPool[i].AutoResetEvent.Set();
                         ThreadPool[i] = null;
                     }
                 }
@@ -154,7 +154,7 @@ namespace ThreadCompressor
             while (WriteBlockIndex != BlockCount)
             {
                 ThreadHandlerCycle(ref CurrentBlockIndex, ReadBlockIndex, ref ProcessedCount, DataFragments, ThreadPool);
-                ThreadHandler.GetDataPLS.WaitOne(200);
+                //ThreadHandler.GetDataPLS.WaitOne(200);
             }
         }
 
@@ -187,8 +187,18 @@ namespace ThreadCompressor
             for (int i = 0; i < ThreadPool.Length; i++)
             {
                 ThreadPool[i] = new ThreadHandler(CompressionMode, BlockSize);
+                ThreadPool[i].IterEndEvent += GzWorker_IterEndEvent;
             }
-            ThreadPoolMaster = new Thread(new ThreadStart(ThreadPoolMasterWork));
+            //ThreadPoolMaster = new Thread(new ThreadStart(ThreadPoolMasterWork));
+        }
+
+        private bool GzWorker_IterEndEvent(ThreadHandler handler)
+        {
+            lock(GetDataLocker)
+            {
+                CollectResult(ref ProcessedCount, handler, DataFragments);
+                return SetWork(ref CurrentBlockIndex, ReadBlockIndex, handler, DataFragments);
+            }
         }
 
         /// <summary>
@@ -229,7 +239,7 @@ namespace ThreadCompressor
         /// <returns>Возвращает true в случае необходимости в новой информации.</returns>
         private bool NeedMoreBlocks(int ReadBlockIndex, int ProcessedCount, ThreadHandler[] ThreadPool)
         {
-            return ReadBlockIndex < (ProcessedCount + ThreadPool.Length * 2.5);
+            return ReadBlockIndex < (ProcessedCount + ThreadPool.Length * /*2.5*/10);
         }
 
         /// <summary>
@@ -400,7 +410,7 @@ namespace ThreadCompressor
         /// <param name="Handler">Поток.</param>
         /// <param name="InputData">Массив данных на обработку.</param>
         //private void SetWork(ref int CurrentBlockIndex, int ReadBlockIndex, ThreadHandler Handler, byte[][] InputData)
-        private void SetWork(ref int CurrentBlockIndex, int ReadBlockIndex, ThreadHandler Handler, DataFragment[] DataFragments)
+        private bool SetWork(ref int CurrentBlockIndex, int ReadBlockIndex, ThreadHandler Handler, DataFragment[] DataFragments)
         {
             //if (CurrentBlockIndex < ReadBlockIndex)
             //{
@@ -423,10 +433,11 @@ namespace ThreadCompressor
                     Handler.DataFragment = DataFragments[CurrentBlockIndex];
                     //InputData[CurrentBlockIndex] = null;
                     CurrentBlockIndex++;
-                    Handler.AutoResetEvent.Set();
+                    //Handler.AutoResetEvent.Set();
+                    return true;
                 }
             }
-            else skipcounter++;
+            return false;
         }
 
         /// <summary>
@@ -453,15 +464,38 @@ namespace ThreadCompressor
             FileStream StreamWriter = (FileStream)InputWriter;
             while (WriteBlockIndex != BlockCount)
             {
-                while (WriteBlockIndex != BlockCount && DataFragments[WriteBlockIndex] != null && DataFragments[WriteBlockIndex].IsProcessed)
+                int count = 0;
+                int start = WriteBlockIndex;
+                int bytes = 0;
+                while (count<100 && start + count != BlockCount && DataFragments[start+count] != null && DataFragments[start + count].IsProcessed)
                 {
                     //Если компрессия, пишем размер сжатого блока, предварительная склейка в ThreadHandler сильно жрала ресурсы, отказались от нее
-                    if (CompressionMode == CompressionMode.Compress) StreamWriter.Write(BitConverter.GetBytes(DataFragments[WriteBlockIndex].Data.Length), 0, 4);
-                    StreamWriter.Write(DataFragments[WriteBlockIndex].Data, 0, DataFragments[WriteBlockIndex].Data.Length);
-                    DataFragments[WriteBlockIndex] = null;
+                    //if (CompressionMode == CompressionMode.Compress) StreamWriter.Write(BitConverter.GetBytes(DataFragments[WriteBlockIndex].Data.Length), 0, 4);
+                    //StreamWriter.Write(DataFragments[WriteBlockIndex].Data, 0, DataFragments[WriteBlockIndex].Data.Length);
+                    //DataFragments[WriteBlockIndex].Data = null;
+                    //DataFragments[WriteBlockIndex] = null;
+                    //WriteBlockIndex++;
+                    if (CompressionMode == CompressionMode.Compress) bytes += 4;
+                    bytes += DataFragments[start + count].Data.Length;
+                    count++;
+                }
+                byte[] data = new byte[bytes];
+                int crntbyte = 0;
+                for (int i = 0; i < count; i++)
+                {
+                    if (CompressionMode == CompressionMode.Compress) 
+                    {
+                        Array.Copy(BitConverter.GetBytes(DataFragments[i+ start].Data.Length), 0, data, crntbyte, 4);
+                        crntbyte += 4;
+                    }
+                    Array.Copy(DataFragments[start + i].Data, 0, data, crntbyte, DataFragments[start + i].Data.Length);
+                    crntbyte += DataFragments[start + i].Data.Length;
+                    DataFragments[start + i] = null;
                     WriteBlockIndex++;
                 }
-                Thread.Sleep(1);
+                if (data.Length > 0) StreamWriter.Write(data, 0, data.Length);
+                Thread.Sleep(250/ThreadPool.Length);
+                GC.Collect();
             }
         }
 

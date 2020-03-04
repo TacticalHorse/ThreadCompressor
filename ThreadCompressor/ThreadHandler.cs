@@ -7,6 +7,8 @@ namespace ThreadCompressor
 {
     class ThreadHandler
     {
+        public delegate bool IterEnd(ThreadHandler handler);
+        public event IterEnd IterEndEvent;
         /// <summary>
         /// Флаг на работу потока
         /// </summary>
@@ -31,9 +33,9 @@ namespace ThreadCompressor
 
         public DataFragment DataFragment;
 
-        public AutoResetEvent AutoResetEvent;
+        //public AutoResetEvent AutoResetEvent;
 
-        public static AutoResetEvent GetDataPLS = new AutoResetEvent(false);
+        //public static AutoResetEvent GetDataPLS = new AutoResetEvent(false);
 
 
         ///// <summary>
@@ -56,18 +58,20 @@ namespace ThreadCompressor
             IsWork = true;
             this.Mode = Mode;
             this.BlockSize = BlockSize;
-            AutoResetEvent = new AutoResetEvent(false);
+            //AutoResetEvent = new AutoResetEvent(false);
             Thread = new Thread(Work);
             Thread.Start();
         }
 
         private void Work()
         {
-            AutoResetEvent.WaitOne();
+            //AutoResetEvent.WaitOne();
             while (IsWork)
             {
                 //if (InputData != null) 
                 //{
+                if (IterEndEvent != null ? IterEndEvent.Invoke(this) : false) 
+                {
                     if (Mode == CompressionMode.Compress)
                     {
                         using (MemoryStream Output = new MemoryStream())
@@ -77,14 +81,14 @@ namespace ThreadCompressor
                                 //gzstream.Write(InputData, 0, InputData.Length);
                                 gzstream.Write(DataFragment.Data, 0, DataFragment.Data.Length);
                             }
-                        //Для сжатого участка отрезаем пустые байты
-                        //OutputData = CutEmptyPart(Output.GetBuffer());
+                            //Для сжатого участка отрезаем пустые байты
+                            //OutputData = CutEmptyPart(Output.GetBuffer());
                             DataFragment.Data = /*Output.GetBuffer();//*/ CutEmptyPart(Output.GetBuffer());
-                    }
+                        }
                     }
                     else
                     {
-                        byte []DecompressedData = new byte[BlockSize];
+                        byte[] DecompressedData = new byte[BlockSize];
                         //OutputData = new byte[BlockSize];
                         int ReadedBytes = 0; //Размер последнего блока будет отличаться от BlockSize
                         //using (GZipStream gzstream = new GZipStream(new MemoryStream(InputData), CompressionMode.Decompress))
@@ -98,10 +102,11 @@ namespace ThreadCompressor
                         DataFragment.Data = DecompressedData;
                     }
                     DataFragment.IsProcessed = true;
-                GetDataPLS.Set();
+                }
+                    //GetDataPLS.Set();
                 //    InputData = null;
                 //}
-                /*else */AutoResetEvent.WaitOne();
+                /*else *//*AutoResetEvent.WaitOne();*/
             }
         }
 

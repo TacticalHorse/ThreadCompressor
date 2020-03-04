@@ -33,7 +33,6 @@ namespace ThreadCompressor
 
             SW.Stop();
             Console.WriteLine(SW.Elapsed);
-            Console.WriteLine(a.skipcounter);
 
             Console.Read();
             return string.IsNullOrEmpty(res) ? 0 : 1;
@@ -42,9 +41,9 @@ namespace ThreadCompressor
             //byte[] datafragment = new byte[32 * 1024 * 1024];
             //using (var sw = File.Create("data.dat"))
             //{
+            //        rnd.NextBytes(datafragment);
             //    for (int i = 0; i < 1024; i++)
             //    {
-            //        rnd.NextBytes(datafragment);
             //        sw.Write(datafragment, 0, datafragment.Length);
             //        Console.WriteLine(i);
             //    }
