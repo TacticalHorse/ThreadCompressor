@@ -30,12 +30,13 @@ namespace ThreadCompressor
             else res = "Неверно заданы аргументы.";
             Console.WriteLine(string.IsNullOrEmpty(res) ? "OK" : res);
 
-
             SW.Stop();
             Console.WriteLine(SW.Elapsed);
 
             Console.Read();
             return string.IsNullOrEmpty(res) ? 0 : 1;
+
+
 
             //Random rnd = new Random();
             //byte[] datafragment = new byte[32 * 1024 * 1024];
@@ -48,6 +49,13 @@ namespace ThreadCompressor
             //        Console.WriteLine(i);
             //    }
             //}
+            //return 0;
+
+
+
+            //Console.WriteLine(Tools.GetHash("data.dat"));
+            //Console.WriteLine(Tools.GetHash("data.dat1"));
+            //Console.Read();
             //return 0;
         }
     }

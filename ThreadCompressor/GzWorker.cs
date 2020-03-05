@@ -242,7 +242,6 @@ namespace ThreadCompressor
         /// <returns>Возвращает true в случае необходимости в новой информации.</returns>
         private bool NeedMoreBlocks(int ReadBlockIndex, int ProcessedCount, ThreadHandler[] ThreadPool)
         {
-            Console.WriteLine(GC.GetTotalMemory(false));
             return GC.GetTotalMemory(false)<(long)1024*1024*1024 && ReadBlockIndex < (ProcessedCount + ThreadPool.Length * /*2.5*/10);
         }
 

@@ -125,7 +125,8 @@ namespace ThreadCompressor
         /// <returns>Стриженый массив.</returns>
         private byte[] CutEmptyPart(byte[] Input)
         {
-            int Index = IndexOfFileTale(Input);
+            int Index = -1;
+            IndexOfFileTale(Input, 0, Input.Length - 1, 20, ref Index);
             if (Index > -1) Array.Resize(ref Input, Index);
             return Input;
         }
@@ -135,15 +136,27 @@ namespace ThreadCompressor
         /// </summary>
         /// <param name="inputArray"></param>
         /// <returns></returns>
-        private int IndexOfFileTale(byte[] inputArray)
+        private void IndexOfFileTale(byte[] inputArray, int start, int end, int deep, ref int reslt)
         {
-            if (inputArray == null || inputArray.Length < 4) return -1;
-            int index = inputArray.Length - 1;
-            while (inputArray[index] == 0x00 && inputArray[index - 1] == 0x00)
+            if (deep == 0) return;
+            int center = (end + start) / 2;
+            if (inputArray[center-1] == 0x00&& inputArray[center] == 0x00)
             {
-                index = index - 2;
+                reslt = center;
+                IndexOfFileTale(inputArray, start, center, deep - 1, ref reslt);
             }
-            return index;
+            else
+            {
+                IndexOfFileTale(inputArray, center, end, deep - 1, ref reslt);
+            }
+
+            //if (inputArray == null || inputArray.Length < 4) return -1;
+            //int index = inputArray.Length - 1;
+            //while (inputArray[index] == 0x00 && inputArray[index - 1] == 0x00)
+            //{
+            //    index = index - 2;
+            //}
+            //return index;
         }
     }
 }
