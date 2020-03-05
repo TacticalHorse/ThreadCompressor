@@ -140,7 +140,7 @@ namespace ThreadCompressor
         {
             if (deep == 0) return;
             int center = (end + start) / 2;
-            if (inputArray[center-1] == 0x00&& inputArray[center] == 0x00)
+            if (inputArray[center] == 0x00&& inputArray[center+1] == 0x00)
             {
                 reslt = center;
                 IndexOfFileTale(inputArray, start, center, deep - 1, ref reslt);
