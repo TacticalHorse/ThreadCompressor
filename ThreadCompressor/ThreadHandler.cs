@@ -92,10 +92,10 @@ namespace ThreadCompressor
                         //OutputData = new byte[BlockSize];
                         int ReadedBytes = 0; //Размер последнего блока будет отличаться от BlockSize
                         //using (GZipStream gzstream = new GZipStream(new MemoryStream(InputData), CompressionMode.Decompress))
-                        using (GZipStream gzstream = new GZipStream(new MemoryStream(DecompressedData), CompressionMode.Decompress))
+                        using (GZipStream gzstream = new GZipStream(new MemoryStream(DataFragment.Data), CompressionMode.Decompress))
                         {
                             //ReadedBytes = gzstream.Read(OutputData, 0, OutputData.Length);
-                            ReadedBytes = gzstream.Read(DataFragment.Data, 0, DataFragment.Data.Length);
+                            ReadedBytes = gzstream.Read(DecompressedData, 0, DecompressedData.Length);
                         }
                         //if (ReadedBytes != BlockSize) Array.Resize(ref OutputData, ReadedBytes); //Потому подтверждаем размер блока
                         if (ReadedBytes != BlockSize) Array.Resize(ref DecompressedData, ReadedBytes); //Потому подтверждаем размер блока

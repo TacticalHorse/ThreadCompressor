@@ -38,6 +38,9 @@ namespace ThreadCompressor
         private string InputFileName;               //Имя исходного файла.
         private string OutputFileName;              //Имя выходного файла.
 
+
+        private byte[] CompressedBlockPart;
+
         //private byte[][] InputData;        //Массив данных на обработку.
         //private byte[][] OutputData;       //Массив обработанных данных.
 
@@ -109,7 +112,7 @@ namespace ThreadCompressor
 
                         while (WriteBlockIndex != BlockCount)
                         {
-                            LoadData(ref ReadBlockIndex, ProcessedCount, BlockSize, BlockCount, InputFileName, CompressionMode, SR, ThreadPool, DataFragments);
+                            LoadData(ref ReadBlockIndex, ProcessedCount, BlockSize, BlockCount, InputFileName, CompressionMode, SR, ThreadPool, DataFragments, ref CompressedBlockPart);
 
                             //if(ThreadPoolMaster == null) ThreadHandlerCycle(ref CurrentBlockIndex, ReadBlockIndex, ref ProcessedCount, InputData, OutputData, ThreadPool); 
 
@@ -209,12 +212,12 @@ namespace ThreadCompressor
         /// <param name="StreamReader">Поток чтения сжатого файла.</param>
         private void ParseFileHeader(ref int BlockCount, ref int BlockSize, FileStream StreamReader)
         {
-            byte[] data = new byte[4];
-            StreamReader.Read(data, 0, 4);
+            byte[] data = new byte[8];
+            StreamReader.Read(data, 0, 8);
             BlockSize = BitConverter.ToInt32(data, 0);
             if (BlockSize < 1) throw new Exception("Файл поврежден.");
-            StreamReader.Read(data, 0, 4);
-            BlockCount = BitConverter.ToInt32(data, 0);
+            //StreamReader.Read(data, 0, 4);
+            BlockCount = BitConverter.ToInt32(data, 4);
             if (BlockCount < 1) throw new Exception("Файл поврежден.");
         }
 
@@ -239,7 +242,8 @@ namespace ThreadCompressor
         /// <returns>Возвращает true в случае необходимости в новой информации.</returns>
         private bool NeedMoreBlocks(int ReadBlockIndex, int ProcessedCount, ThreadHandler[] ThreadPool)
         {
-            return ReadBlockIndex < (ProcessedCount + ThreadPool.Length * /*2.5*/10);
+            Console.WriteLine(GC.GetTotalMemory(false));
+            return GC.GetTotalMemory(false)<(long)1024*1024*1024 && ReadBlockIndex < (ProcessedCount + ThreadPool.Length * /*2.5*/10);
         }
 
         /// <summary>
@@ -269,18 +273,79 @@ namespace ThreadCompressor
         //    inputdata[ReadBlockIndex] = arr;
         //    ReadBlockIndex++;
         //}
-        private void LoadCompressedBlock(ref int ReadBlockIndex, FileStream StreamReader, DataFragment[] DataFragments)
+        private void LoadCompressedBlock(ref int ReadBlockIndex, FileStream StreamReader, DataFragment[] DataFragments, ref byte[] CompressedBlockPart)
         {
-            byte[] sizedata = new byte[4];
-            Stopwatch sw = Stopwatch.StartNew();
-            StreamReader.Read(sizedata, 0, 4);
-            int size = BitConverter.ToInt32(sizedata, 0);
-            byte[] arr = new byte[size];
-            sw.Restart();
-            StreamReader.Read(arr, 0, size);
-            sw.Restart();
-            DataFragments[ReadBlockIndex] = new DataFragment() { Data = arr };
-            ReadBlockIndex++;
+            byte[] buffer = new byte[50 * BlockSize]; 
+            int readed = StreamReader.Read(buffer, 0, buffer.Length);
+            int size = 0;
+            int index = 0;
+            if (CompressedBlockPart!= null)
+            {
+                if(CompressedBlockPart.Length<4)
+                {
+                    byte[] sizedata = new byte[4];
+                    Array.Copy(CompressedBlockPart, 0, sizedata, 0, CompressedBlockPart.Length);
+                    Array.Copy(buffer, 0, sizedata, CompressedBlockPart.Length, CompressedBlockPart.Length- sizedata.Length);
+                    index = sizedata.Length;
+                    size = BitConverter.ToInt32(sizedata,0);
+                    byte[] block = new byte[size];
+
+                    Array.Copy(buffer, index, block, 0, size);
+
+                    index += size;
+                    DataFragments[ReadBlockIndex] = new DataFragment() { Data = block };
+                    ReadBlockIndex++;
+                }
+                else
+                {
+                    size = BitConverter.ToInt32(CompressedBlockPart, 0);
+                    byte[] block = new byte[size];
+                    Array.Copy(CompressedBlockPart, 4, block, 0, CompressedBlockPart.Length - 4);
+                    Array.Copy(buffer, 0, block, CompressedBlockPart.Length - 4, size - (CompressedBlockPart.Length - 4));
+                    index = size - (CompressedBlockPart.Length - 4);
+                    DataFragments[ReadBlockIndex] = new DataFragment() { Data = block };
+                    ReadBlockIndex++;
+                }
+            }
+            while (true)
+            {
+                if (index + 4 < buffer.Length)
+                {
+                    size = BitConverter.ToInt32(buffer, index);
+                    if (size == 0) return;
+                    index += 4;
+
+                    if(size +index>buffer.Length)
+                    {
+                        CompressedBlockPart = new byte[buffer.Length - (index - 4)];
+                        Array.Copy(buffer, index-4, CompressedBlockPart, 0, CompressedBlockPart.Length);
+                        break;
+                    }
+                    else
+                    {
+                        byte[] block = new byte[size];
+                        Array.Copy(buffer, index, block, 0, block.Length);
+                        DataFragments[ReadBlockIndex] = new DataFragment() { Data = block };
+                        index += size;
+                        ReadBlockIndex++;
+                    }
+                }
+                else
+                {
+                    CompressedBlockPart = new byte[buffer.Length - (index - 4)];
+                    Array.Copy(buffer, index-4, CompressedBlockPart, 0, CompressedBlockPart.Length);
+                    break;
+                }
+            }
+
+            //byte[] sizedata = new byte[4];
+            //Stopwatch sw = Stopwatch.StartNew();
+            //StreamReader.Read(sizedata, 0, 4);
+            //int size = BitConverter.ToInt32(sizedata, 0);
+            //byte[] arr = new byte[size];
+            //StreamReader.Read(arr, 0, size);
+            //DataFragments[ReadBlockIndex] = new DataFragment() { Data = arr };
+            //ReadBlockIndex++;
         }
 
         /// <summary>
@@ -299,10 +364,18 @@ namespace ThreadCompressor
         //}
         private void LoadBlock(ref int ReadBlockIndex, int BlockSize, FileStream StreamReader, DataFragment[] DataFragments)
         {
-            var arr = new byte[BlockSize];
-            StreamReader.Read(arr, 0, BlockSize);
-            DataFragments[ReadBlockIndex] = new DataFragment() { Data = arr };
-            ReadBlockIndex++;
+            byte[] buffer = new byte[BlockSize * 50];
+            int readed = StreamReader.Read(buffer, 0, buffer.Length);
+            for (int i = 0; i < readed; i+=BlockSize)
+            {
+                byte[] block = i + BlockSize > readed ? new byte[readed - i] : new byte[BlockSize];
+                Array.Copy(buffer, i, block, 0, block.Length);
+                DataFragments[ReadBlockIndex] = new DataFragment() { Data = block };
+                ReadBlockIndex++;
+            }
+            //var arr = new byte[BlockSize];
+            //StreamReader.Read(arr, 0, BlockSize);
+            //DataFragments[ReadBlockIndex] = new DataFragment() { Data = arr };
         }
 
         /// <summary>
@@ -344,7 +417,7 @@ namespace ThreadCompressor
         //        }
         //    }
         //}
-        private void LoadData(ref int ReadBlockIndex, int ProcessedCount, int BlockSize, int BlockCount, string InputFileName, CompressionMode CompressionMode, FileStream StreamReader, ThreadHandler[] ThreadPool, DataFragment[] InputData)
+        private void LoadData(ref int ReadBlockIndex, int ProcessedCount, int BlockSize, int BlockCount, string InputFileName, CompressionMode CompressionMode, FileStream StreamReader, ThreadHandler[] ThreadPool, DataFragment[] InputData, ref byte[] CompressedBlockPart)
         {
             while (NeedMoreBlocks(ReadBlockIndex, ProcessedCount, ThreadPool))
             {
@@ -355,19 +428,20 @@ namespace ThreadCompressor
                     if (CompressionMode == CompressionMode.Decompress)
                     {
                         //LoadCompressedBlock(ref ReadBlockIndex, StreamReader, InputData);
-                        LoadCompressedBlock(ref ReadBlockIndex, StreamReader, InputData);
+                        LoadCompressedBlock(ref ReadBlockIndex, StreamReader, InputData, ref CompressedBlockPart);
                     }
                     else
                     {
-                        if (IsLastBlock(ReadBlockIndex, BlockCount))
-                        {
-                            int lastblocksize = (int)(new FileInfo(InputFileName).Length - ReadBlockIndex * BlockSize); //тк последний блок может отличаться от заданного размера(BlockSize), вычисляем размеры.
-                            LoadBlock(ref ReadBlockIndex, lastblocksize, StreamReader, InputData);
-                        }
-                        else
-                        {
-                            LoadBlock(ref ReadBlockIndex, BlockSize, StreamReader, InputData);
-                        }
+                        LoadBlock(ref ReadBlockIndex, BlockSize, StreamReader, InputData);
+                        //if (IsLastBlock(ReadBlockIndex, BlockCount))
+                        //{
+                        //    int lastblocksize = (int)(new FileInfo(InputFileName).Length - ReadBlockIndex * BlockSize); //тк последний блок может отличаться от заданного размера(BlockSize), вычисляем размеры.
+                        //    LoadBlock(ref ReadBlockIndex, lastblocksize, StreamReader, InputData);
+                        //}
+                        //else
+                        //{
+                        //    LoadBlock(ref ReadBlockIndex, BlockSize, StreamReader, InputData);
+                        //}
                     }
                 }
                 else break;
