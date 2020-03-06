@@ -78,7 +78,7 @@ namespace ThreadCompressor
                                 gzstream.Write(DataFragment.Data, 0, DataFragment.Data.Length);
                             }
                             //Для сжатого участка отрезаем пустые байты
-                            DataFragment.Data = CutEmptyPart(Output.GetBuffer());
+                            DataFragment.Data = CutEmptyPart(Output.GetBuffer(),10);
                         }
                     }
                     else
@@ -108,12 +108,13 @@ namespace ThreadCompressor
         /// <summary>
         /// Срезаем хвосты блоков
         /// </summary>
-        /// <param name="Input"></param>
+        /// <param name="Input">Обрабатываемый массив</param>
+        /// <param name="Deep">Глубина поиска.</param>
         /// <returns>Стриженый массив.</returns>
-        private byte[] CutEmptyPart(byte[] Input)
+        private byte[] CutEmptyPart(byte[] Input, int Deep)
         {
             int Index = -1;
-            IndexOfFileTale(Input, 0, Input.Length - 1, 20, ref Index);
+            IndexOfFileTale(Input, 0, Input.Length - 1, Deep, ref Index);
             if (Index > -1) Array.Resize(ref Input, Index);
             return Input;
         }
