@@ -5,6 +5,9 @@ using System.Threading;
 
 namespace ThreadCompressor
 {
+    /// <summary>
+    /// Обрабочик блоков данных
+    /// </summary>
     class ThreadHandler
     {
         /// <summary>
