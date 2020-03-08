@@ -1,7 +1,6 @@
 ﻿using System;
-using System.Diagnostics;
 using System.IO.Compression;
-using System.Threading.Tasks;
+using System.Runtime.InteropServices;
 
 namespace ThreadCompressor
 {
@@ -9,10 +8,12 @@ namespace ThreadCompressor
     {
         static int Main(string[] args)
         {
-            Stopwatch s = Stopwatch.StartNew();
             GzWorker a = null;
             Console.Clear();
             string res = "";
+
+            if (Marshal.SizeOf(typeof(IntPtr)) != 8) { Console.WriteLine("Приложение должно быть собрано для систем x64"); return 1; }
+
             if (args.Length == 3)
             {
                 if (args[0].ToLower() == "compress" || args[0].ToLower() == "decompress")
@@ -26,19 +27,8 @@ namespace ThreadCompressor
                 }
             }
             else res = "Неверно заданы аргументы.";
-            s.Stop();
-            Console.WriteLine(s.Elapsed);
             Console.WriteLine(string.IsNullOrEmpty(res) ? "OK" : res);
             return string.IsNullOrEmpty(res) ? 0 : 1;
-
-            //Task.Factory.StartNew(() => Tools.GetHash("d.d"));
-            //Task.Factory.StartNew(() => Tools.GetHash("d.e"));
-            //Console.Read();
-            //return 0;
-
-
-            //Tools.CreateFile((long)32 * 1024 * 1024 * 1024, "d.d");
-            //return 0;
         }
     }
 }

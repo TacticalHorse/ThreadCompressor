@@ -8,10 +8,13 @@ EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		x64|x64 = x64|x64
+		x64|x86 = x64|x86
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
 		{5B0C7F7B-6BCE-46A7-B702-3D752EF0F093}.x64|x64.ActiveCfg = x64|x64
 		{5B0C7F7B-6BCE-46A7-B702-3D752EF0F093}.x64|x64.Build.0 = x64|x64
+		{5B0C7F7B-6BCE-46A7-B702-3D752EF0F093}.x64|x86.ActiveCfg = x64|x86
+		{5B0C7F7B-6BCE-46A7-B702-3D752EF0F093}.x64|x86.Build.0 = x64|x86
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

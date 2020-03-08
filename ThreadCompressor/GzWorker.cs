@@ -1,5 +1,4 @@
 ﻿using System;
-using System.Diagnostics;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
@@ -27,33 +26,80 @@ namespace ThreadCompressor
         private int _CurrentFragmentToWriteIndex;
         private int _FragmentIndexToCalculate;
         private int _Size = 0;                      //Перменная под каст byte[]->int
-        private byte[] _SizeData = new byte[4];    //Массив под каст byte[]->int
+        private byte[] _SizeData = new byte[4];     //Массив под каст byte[]->int
 
-        private int BlockCount;                     //Количество блоков в файле.
-        private int ReadBlockCount;                 //Индекс последнего прочитанного блока.
-        private int WriteBlockCount;                //Индекс последнего записанного блока.
-        private int CurrentBlockCount;              //Текущий обрабатываемый блок.
-        private int ProcessedCount;                 //Количество обработаных блоков.
+        /// <summary>
+        /// Количество блоков в файле.
+        /// </summary>
+        private int BlockCount;
+        /// <summary>
+        /// Индекс последнего прочитанного блока.
+        /// </summary>
+        private int ReadBlockCount;
+        /// <summary>
+        /// Индекс последнего записанного блока.
+        /// </summary>
+        private int WriteBlockCount;
+        /// <summary>
+        /// Текущий обрабатываемый блок.
+        /// </summary>
+        private int CurrentBlockCount;
+        /// <summary>
+        /// Количество обработаных блоков.
+        /// </summary>
+        private int ProcessedCount;
 
-        private ThreadHandler[] ThreadPool;         //Пул потоков.
-        private Thread WriteWorker;                 //Поток на запись данных.
+        /// <summary>
+        /// Поток на запись данных.
+        /// </summary>
+        private Thread WriteWorker;
+        /// <summary>
+        /// Пул потоков.
+        /// </summary>
+        private ThreadHandler[] ThreadPool;
 
-        private AutoResetEvent DataLoading;         //Сигнал о поступлении новых данных.
-        private AutoResetEvent FragmentRelease;     //Фрагмент освобожден. Вызывается после записи в файл.
-        private AutoResetEvent FragmentProcessed;   //Фрагмент обработан. Вызывается после фиксирования результата упаковки/распаковки блока.
+        /// <summary>
+        /// Сигнал о поступлении новых данных.
+        /// </summary>
+        private AutoResetEvent DataLoading;
+        /// <summary>
+        /// Фрагмент освобожден. Вызывается после записи в файл.
+        /// </summary>
+        private AutoResetEvent FragmentRelease;
+        /// <summary>
+        /// Фрагмент обработан. Вызывается после фиксирования результата упаковки/распаковки блока.
+        /// </summary>
+        private AutoResetEvent FragmentProcessed;
 
-        private string InputFileName;               //Имя исходного файла.
-        private string OutputFileName;              //Имя выходного файла.
+        /// <summary>
+        /// Имя исходного файла.
+        /// </summary>
+        private string InputFileName;               
+        /// <summary>
+        /// Имя выходного файла.
+        /// </summary>
+        private string OutputFileName;
+        /// <summary>
+        /// Остаточная часть с буффера, для декомпрессии.
+        /// </summary>
+        private byte[] CompressedBlockPart;
+        /// <summary>
+        /// Пул блоков на корм потокам.
+        /// </summary>
+        private DataFragment[] DataFragments;
+        /// <summary>
+        /// Упаковка/Распаковка
+        /// </summary>
+        private CompressionMode CompressionMode;
+        /// <summary>
+        /// Локер для работы с DataFragments в <see cref="GzWorker_IterEndEvent"/>
+        /// </summary>
+        private static object GetDataLocker = new object();
 
-        private byte[] CompressedBlockPart;         //Остаточная часть с буффера, для декомпрессии.
-
-        private DataFragment[] DataFragments;       //Пул блоков на корм потокам.
-
-        private CompressionMode CompressionMode;    //Упаковка/Распаковка
-
-        private static object GetDataLocker = new object(); //Локер для работы с DataFragments
-
-        private int CurrentFragmentIndex            //Указатель на следующую структуру в DataFragments
+        /// <summary>
+        /// Указатель на следующую структуру в DataFragments
+        /// </summary>
+        private int CurrentFragmentIndex
         {
             get => _CurrentFragmentIndex;
             set
@@ -61,7 +107,10 @@ namespace ThreadCompressor
                 _CurrentFragmentIndex = value < DataFragments.Length ? value : 0;
             }
         }
-        private int FragmentIndexToCalculate        //Указатель на следующую структуру в DataFragments
+        /// <summary>
+        /// Указатель на следующую структуру в DataFragments
+        /// </summary>
+        private int FragmentIndexToCalculate
         {
             get => _FragmentIndexToCalculate;
             set
@@ -69,7 +118,10 @@ namespace ThreadCompressor
                 _FragmentIndexToCalculate = value < DataFragments.Length ? value : 0;
             }
         }
-        private int CurrentFragmentToWriteIndex     //Указатель на следующий блок, записываемый в файл
+        /// <summary>
+        /// Указатель на следующий блок, записываемый в файл
+        /// </summary>
+        private int CurrentFragmentToWriteIndex
         {
             get => _CurrentFragmentToWriteIndex;
             set
