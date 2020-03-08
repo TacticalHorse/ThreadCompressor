@@ -1,8 +1,6 @@
 ﻿using System;
 using System.IO;
 using System.Security.Cryptography;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace ThreadCompressor
 {
@@ -21,12 +19,12 @@ namespace ThreadCompressor
         }
 
 
-        public static void CreateFile(int Size, string FileName)
+        public static void CreateFile(long Size, string FileName)
         {
-            byte[] basePart = new byte[1000];
+            byte[] basePart = new byte[32*1024*1024];
             new Random().NextBytes(basePart);
 
-            int count = 0;
+            long count = 0;
             using (var writer = File.Create(FileName))
             {
                 while (count + basePart.Length < Size)
@@ -34,7 +32,7 @@ namespace ThreadCompressor
                     writer.Write(basePart, 0, basePart.Length);
                     count += basePart.Length;
                 }
-                writer.Write(basePart, 0, Size - count);
+                writer.Write(basePart, 0, (int)(Size - count));
             }
         }
     }

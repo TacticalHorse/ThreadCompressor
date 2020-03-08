@@ -1,7 +1,9 @@
 ﻿using System;
+using System.Diagnostics;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Threading;
 
 namespace ThreadCompressor
@@ -236,12 +238,6 @@ namespace ThreadCompressor
                 DataFragments[FragmentIndex].ActualBytes = Constants.BufferBlockSize;
                 DataFragments[FragmentIndex].OriginalSize = _Size;
 
-                //while (_Size < Constants.BufferBlockSize)           //Чистка, нужна ли?
-                //{
-                //    DataFragments[FragmentIndex].DataBuffer[_Size] = 0;
-                //    _Size++;
-                //}
-
                 ReadBlockCount++;
                 DataLoading.Set();
             }
@@ -263,11 +259,14 @@ namespace ThreadCompressor
                 DataFragments[FragmentIndex].ActualBytes = Constants.BufferBlockSize;
                 DataFragments[FragmentIndex].OriginalSize = _Size;
 
-                while (_Size < Constants.BufferBlockSize)               //Чистка
+                unsafe //Чистим буффер от возможных остатков с предыдущей обработки
                 {
-                    DataFragments[FragmentIndex].DataBuffer[_Size] = 0;
-                    _Size++;
+                    fixed (byte* ptr = &DataFragments[FragmentIndex].DataBuffer[_Size])
+                    {
+                        Marshal.Copy(Constants.EmptyData, 0, (IntPtr)ptr, (Constants.BufferBlockSize - _Size) / 8);
+                    }
                 }
+
 
                 ReadBlockCount++;
                 DataLoading.Set();
@@ -321,7 +320,7 @@ namespace ThreadCompressor
             if (CurrentBlockCount < ReadBlockCount)
             {
                 fixed (byte* DP = &DataFragments[FragmentIndexToCalculate].DataBuffer[0]) { Handler.Data = DP; }
-
+                //Handler.Data = DataFragments[FragmentIndexToCalculate].DataBuffer;
                 Handler.ActualBytes = DataFragments[FragmentIndexToCalculate].ActualBytes;
                 Handler.OriginalSize = DataFragments[FragmentIndexToCalculate].OriginalSize;
                 Handler.IsProcessed = DataFragments[FragmentIndexToCalculate].IsProcessed;
@@ -348,7 +347,6 @@ namespace ThreadCompressor
                     ((FileStream)InputWriter).Write(DataFragments[CurrentFragmentToWriteIndex].DataBuffer, 0, DataFragments[CurrentFragmentToWriteIndex].ActualBytes);
                     DataFragments[CurrentFragmentToWriteIndex].IsProcessed = false;
                     DataFragments[CurrentFragmentToWriteIndex].OriginalSize = 0;
-                    //DataFragments[CurrentFragmentToWriteIndex].ActualBytes = 0;
 
                     CurrentFragmentToWriteIndex++;
                     FragmentRelease.Set();

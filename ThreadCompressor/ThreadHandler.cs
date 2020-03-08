@@ -62,7 +62,6 @@ namespace ThreadCompressor
         public event IterEnd IterEndEvent;
 
 
-
         /// <summary>
         /// Создает обработчик, и запускает поток обработки данных.
         /// </summary>
@@ -87,13 +86,12 @@ namespace ThreadCompressor
                     {
                         using (UnmanagedMemoryStream Output = new UnmanagedMemoryStream(Data, Constants.BufferBlockSize, Constants.BufferBlockSize, FileAccess.Write))
                         {
-                            Marshal.Copy((IntPtr)Data, TmpArray, 0, Constants.BufferBlockSize);                 //Преписываем полностью, затирая старый мусор
+                            Marshal.Copy((IntPtr)Data, TmpArray, 0, Constants.BufferBlockSize);                         //Преписываем полностью, затирая старый мусор
+                            Marshal.Copy(Constants.EmptyData, 0, (IntPtr)Data, Constants.EmptyData.Length);             //Чистим исходный массив
                             using (GZipStream gzstream = new GZipStream(Output, CompressionMode.Compress))
-                            {
-                                gzstream.Write(TmpArray, 0, OriginalSize);
-                            }
+                            { gzstream.Write(TmpArray, 0, OriginalSize); }
                         }
-                        IndexOfFileTale(Data, 0, Constants.BufferBlockSize, 15, ref ActualBytes);               //Индекс хвоста, можно и больше но смысла мало. При блоке в 8мб точность +- 128 байт
+                        IndexOfFileTale(Data, 0, Constants.BufferBlockSize, 15, ref ActualBytes);                       //Индекс хвоста, можно и больше но смысла мало. При блоке в 8мб точность 256 байт
                     }
                     else
                     {
@@ -102,9 +100,9 @@ namespace ThreadCompressor
                             using (GZipStream gzstream = new GZipStream(Output, CompressionMode.Decompress))
                             {
                                 ActualBytes = gzstream.Read(TmpArray, 0, Constants.BlockSize);
-                            }                              
+                            }
                         }
-                        Marshal.Copy(TmpArray, 0, (IntPtr)Data, ActualBytes); 
+                        Marshal.Copy(TmpArray, 0, (IntPtr)Data, ActualBytes);
                     }
                     IsProcessed = true;
                 }
@@ -125,20 +123,28 @@ namespace ThreadCompressor
         /// <param name="InputArray">Проверяемый массив</param>
         /// <param name="Start">Начало просматриваемого отрезка</param>
         /// <param name="End">Конец просмативаемого отрезка</param>
-        /// <param name="Deep">Количество рекурсионных вызовов функции</param>
+        /// <param name="Deep">Глубина поиска</param>
         /// <param name="Index">Индекс конца блока</param>
         private void IndexOfFileTale(byte* InputArray, int Start, int End, int Deep, ref int Index)
         {
+            long* ptr;
             int Center;
             while (Deep > 0)
             {
                 Center = (End + Start) / 2;
-                if (InputArray[Center] == 0x00 && InputArray[Center + 1] == 0x00)
+
+                ptr = (long*)(&InputArray[Center]);     //Тестил на видосике, хватало чтобы сохранить целостность файла.
+                if (ptr[-3] == 0L
+                   && ptr[-2] == 0L
+                   && ptr[-1] == 0L
+                   && ptr[0] == 0L
+                   && ptr[1] == 0L
+                   && ptr[2] == 0L)
                 {
                     Index = Center;
                     End = Center;
                 }
-                else Start = Center; 
+                else Start = Center;
                 Deep--;
             }
         }

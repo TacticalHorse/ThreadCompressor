@@ -1,5 +1,4 @@
-﻿
-namespace ThreadCompressor
+﻿namespace ThreadCompressor
 {
     /// <summary>
     /// Циферки.
@@ -18,5 +17,9 @@ namespace ThreadCompressor
         /// Коеф на пул блоков. Пул блоков (<see cref="GzWorker.DataFragments"/>) определяется количеством процессовров * коеф 
         /// </summary>
         public const int DataFragmentCoef = 10;
+        /// <summary>
+        /// Набор пустых значений для копирования.
+        /// </summary>
+        public static long[] EmptyData = new long[BufferBlockSize/8];
     }
 }
