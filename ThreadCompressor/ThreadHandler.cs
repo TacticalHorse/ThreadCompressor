@@ -12,17 +12,6 @@ namespace ThreadCompressor
     unsafe class ThreadHandler
     {
         /// <summary>
-        /// Делегат для запроса нового задания.
-        /// </summary>
-        /// <param name="handler">Поток обработки блоков</param>
-        /// <returns>Должен вернуть true в случае выдачи нового задания.</returns>
-        public delegate bool IterEnd(ThreadHandler handler);
-        /// <summary>
-        /// Вызывается после обработки массива данных, регистрации выполнения, и выдачи нового задания.
-        /// Если новое задание выдано, возвращает true.
-        /// </summary>
-        public event IterEnd IterEndEvent;
-        /// <summary>
         /// Флаг на работу потока.
         /// </summary>
         private bool IsWork;
@@ -34,31 +23,45 @@ namespace ThreadCompressor
         /// Компрессия/декомпрессия.
         /// </summary>
         private CompressionMode Mode;
-
+        /// <summary>
+        /// Местный вспомогательный массив.
+        /// </summary>
+        private byte[] TmpArray;
 
         /// <summary>
-        /// Обработано
+        /// Обработано?
         /// </summary>
         public bool IsProcessed;
         /// <summary>
-        /// Количество байт на запись.
+        /// Количество байт на выходе.
         /// </summary>
         public int ActualBytes;
         /// <summary>
-        /// Исходный размер
+        /// Исходный размер.
         /// </summary>
         public int OriginalSize;
         /// <summary>
-        /// Указатель на фиксированный массив данных.
+        /// Указатель на массив данных.
         /// </summary>
         public byte* Data;
-
         /// <summary>
         /// Индекс обрабатываемого блока.
         /// </summary>
-        public long Index;
+        public long Index = -1;
 
-        private byte[] TmpArray;
+        /// <summary>
+        /// Делегат для запроса нового задания.
+        /// </summary>
+        /// <param name="handler">Поток обработки блоков</param>
+        /// <returns>Должен вернуть true в случае выдачи нового задания.</returns>
+        public delegate bool IterEnd(ThreadHandler handler);
+        /// <summary>
+        /// Вызывается после обработки массива данных, регистрации выполнения, и выдачи нового задания.
+        /// Если новое задание выдано, возвращает true.
+        /// </summary>
+        public event IterEnd IterEndEvent;
+
+
 
         /// <summary>
         /// Создает обработчик, и запускает поток обработки данных.
@@ -72,10 +75,8 @@ namespace ThreadCompressor
             Thread = new Thread(Work);
             Thread.Priority = ThreadPriority.Highest;
             Thread.Start();
-
             TmpArray = new byte[Constants.BufferBlockSize];
         }
-
         private void Work()
         {
             while (IsWork)
@@ -84,32 +85,27 @@ namespace ThreadCompressor
                 {
                     if (Mode == CompressionMode.Compress)
                     {
-                        //using (MemoryStream Output = new MemoryStream(Data))
-                        using (UnmanagedMemoryStream Output = new UnmanagedMemoryStream(Data, Constants.BlockSize, Constants.BufferBlockSize, FileAccess.Write))
+                        using (UnmanagedMemoryStream Output = new UnmanagedMemoryStream(Data, Constants.BufferBlockSize, Constants.BufferBlockSize, FileAccess.Write))
                         {
-                            //Array.Copy(Data, 0, TmpArray, 0, Constants.BlockSize);
-                            Marshal.Copy((IntPtr)Data, TmpArray, 0, Constants.BlockSize);
+                            Marshal.Copy((IntPtr)Data, TmpArray, 0, Constants.BufferBlockSize);                 //Преписываем полностью, затирая старый мусор
                             using (GZipStream gzstream = new GZipStream(Output, CompressionMode.Compress))
                             {
-                                gzstream.Write(TmpArray, 0, TmpArray.Length);
+                                gzstream.Write(TmpArray, 0, OriginalSize);
                             }
-                            //IndexOfFileTale(Data, 0, Constants.BufferBlockSize, 15, ref ActualBytes);
-                            IndexOfFileTale(Data, 0, Constants.BufferBlockSize, 15, ref ActualBytes);
                         }
+                        IndexOfFileTale(Data, 0, Constants.BufferBlockSize, 15, ref ActualBytes);               //Индекс хвоста, можно и больше но смысла мало. При блоке в 8мб точность +- 128 байт
                     }
                     else
                     {
-                        //Marshal.Copy((IntPtr)Data, TmpArray, 0, Constants.BlockSize);
-                        using (UnmanagedMemoryStream Output = new UnmanagedMemoryStream(Data, ActualBytes, Constants.BufferBlockSize, FileAccess.Read))
+                        using (UnmanagedMemoryStream Output = new UnmanagedMemoryStream(Data, OriginalSize, Constants.BufferBlockSize, FileAccess.Read))
                         {
                             using (GZipStream gzstream = new GZipStream(Output, CompressionMode.Decompress))
                             {
                                 ActualBytes = gzstream.Read(TmpArray, 0, Constants.BlockSize);
-                            }
-                            Marshal.Copy(TmpArray, 0, (IntPtr)Data, ActualBytes);
+                            }                              
                         }
+                        Marshal.Copy(TmpArray, 0, (IntPtr)Data, ActualBytes); 
                     }
-                    //IsProcessed = true;
                     IsProcessed = true;
                 }
             }
@@ -131,22 +127,20 @@ namespace ThreadCompressor
         /// <param name="End">Конец просмативаемого отрезка</param>
         /// <param name="Deep">Количество рекурсионных вызовов функции</param>
         /// <param name="Index">Индекс конца блока</param>
-        //private void IndexOfFileTale(byte* InputArray, int Start, int End, int Deep, ref int* Index)
-        //private void IndexOfFileTale(byte[] InputArray, int Start, int End, int Deep, int Index)
         private void IndexOfFileTale(byte* InputArray, int Start, int End, int Deep, ref int Index)
         {
-            if (Deep == 0) return;
-            int Сenter = (End + Start) / 2;
-            //if (InputArray[Сenter] == 0x00 && InputArray[Сenter + 1] == 0x00)
-            if (InputArray[Сenter] == 0x00 && InputArray[Сenter + 1] == 0x00)
+            int Center;
+            while (Deep > 0)
             {
-                //*Index = Сenter;
-                Index = Сenter;
-                //IndexOfFileTale(InputArray, Start, Сenter, Deep - 1, Index);
-                IndexOfFileTale(InputArray, Start, Сenter, Deep - 1, ref Index);
+                Center = (End + Start) / 2;
+                if (InputArray[Center] == 0x00 && InputArray[Center + 1] == 0x00)
+                {
+                    Index = Center;
+                    End = Center;
+                }
+                else Start = Center; 
+                Deep--;
             }
-            else IndexOfFileTale(InputArray, Сenter, End, Deep - 1, ref Index);
-            //else IndexOfFileTale(InputArray, Сenter, End, Deep - 1, Index);
         }
     }
 }

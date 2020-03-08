@@ -3,7 +3,7 @@
     /// <summary>
     /// Блок данных
     /// </summary>
-    public struct DataFragment
+    public unsafe struct DataFragment
     {
         /// <summary>
         /// Обработано
