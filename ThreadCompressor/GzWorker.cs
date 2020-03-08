@@ -13,8 +13,7 @@ namespace ThreadCompressor
     /// ---------Карта сжатого файла----------
     /// 
     /// ________________БОШКА_________________
-    /// [4 байта(int) размер исходного блока]
-    /// [4 байта(int) количество сжатих блоков]
+    /// [4 байта(int) количество сжатых блоков]
     /// 
     /// ________________БЛОКИ_________________
     /// [4 байта(int) размер сжатого блока]
@@ -24,29 +23,37 @@ namespace ThreadCompressor
     class GzWorker
     {
         private int BlockCount;                     //Количество блоков в файле.
-        private int ReadBlockIndex;                 //Индекс последнего прочитанного блока.
-        private int WriteBlockIndex;                //Индекс последнего записанного блока.
-        private int CurrentBlockIndex;              //Текущий обрабатываемый блок.
-        private int BlockSize;                      //Размер блока исходного файла.
+        private int ReadBlockcCount;                 //Индекс последнего прочитанного блока.
+        private int WriteBlockCount;                //Индекс последнего записанного блока.
+        private int CurrentBlockCount;              //Текущий обрабатываемый блок.
+        private int CurrentFragmentIndex = -1;        //Указатель на следующую структуру в DataFragments
+        private int FragmentIndexToCalculate;       //Указатель на следующую структуру в DataFragments
+        private int CurrentFragmentToWriteIndex;
+
         private int ProcessedCount;                 //Количество обработаных блоков.
-        private int LoadBufferSize;                 //Размер фрагмента считываемого из входящего файла за раз
 
         private ThreadHandler[] ThreadPool;         //Пул потоков.
         private Thread WriteWorker;                 //Поток на запись данных
 
         private AutoResetEvent DataLoading;         //Отпуск ThreadHandler'ов
+        private AutoResetEvent FragmentRelease;     //Фрагмент освобожден
+        private AutoResetEvent FragmentProcessed;     //Фрагмент освобожден
 
         private string InputFileName;               //Имя исходного файла.
         private string OutputFileName;              //Имя выходного файла.
 
 
+        private int CompressedBlockPartLength;      //Размер остаточной части
         private byte[] CompressedBlockPart;         //Остаточная часть с буффера, для декомпрессии
+        private byte[] ReadBuffer;                  //Буфер подгрузки из файла
+        private byte[] WriteBuffer;                 //Буффер на запись
 
         private DataFragment[] DataFragments;       //Обрабатываемые данные
 
         private CompressionMode CompressionMode;    //Упаковка/Распаковка
 
         private static object GetDataLocker = new object(); //Локер для работы с DataFragments
+        private static object dd = new object(); 
 
         /// <summary>
         /// 
@@ -55,8 +62,18 @@ namespace ThreadCompressor
         /// <param name="OutputFileName">Имя выходного файла.</param>
         public GzWorker(string InputFileName, string OutputFileName)
         {
-            BlockSize = 1048576 * 3;
+            GC.SuppressFinalize(this);
             DataLoading = new AutoResetEvent(false);
+            FragmentRelease = new AutoResetEvent(false);
+            FragmentProcessed = new AutoResetEvent(false);
+            CompressedBlockPart = new byte[Constants.BufferBlockSize];
+            ReadBuffer = new byte[Constants.ReadBufferSize];
+            WriteBuffer = new byte[Constants.WriteBufferSize];
+            DataFragments = new DataFragment[Environment.ProcessorCount * Constants.DataFragmentCoef];
+            for (int i = 0; i < DataFragments.Length; i++)
+            {
+                DataFragments[i].DataBuffer = new byte[Constants.BufferBlockSize];
+            }
             this.InputFileName = InputFileName;
             this.OutputFileName = OutputFileName;
         }
@@ -69,6 +86,7 @@ namespace ThreadCompressor
         public string Start(CompressionMode CompressionMode)
         {
             this.CompressionMode = CompressionMode;
+            Thread.CurrentThread.Priority = ThreadPriority.AboveNormal;
             Console.WriteLine(CompressionMode.ToString());
             try
             {
@@ -78,26 +96,26 @@ namespace ThreadCompressor
                     {
                         if (CompressionMode == CompressionMode.Decompress)
                         {
-                            ParseFileHeader(ref BlockCount, ref BlockSize, SR);
-                            CheckFreeSpaceForDecompress(BlockSize, BlockCount, OutputFileName);
+                            ParseFileHeader(ref BlockCount, SR);
+                            CheckFreeSpaceForDecompress(BlockCount, OutputFileName);
                         }
-                        else CreateFileHeader(ref BlockCount, BlockSize, InputFileName, SW);
-                        DataFragments = new DataFragment[BlockCount];
+                        else CreateFileHeader(ref BlockCount, InputFileName, SW);
 
-                        CreateHandlers(BlockSize, CompressionMode, ref ThreadPool);
-                        LoadBufferSize = BlockSize * ThreadPool.Length * 5;
+                        CreateHandlers(CompressionMode, ref ThreadPool);
+
                         WriteWorker = new Thread(new ParameterizedThreadStart(WriteResultInFile));
+                        WriteWorker.Priority = ThreadPriority.Highest;
                         WriteWorker.Start(SW);
 
-                        while (WriteBlockIndex != BlockCount)
+                        while (WriteBlockCount != BlockCount)
                         {
-                            LoadData(ref ReadBlockIndex, ProcessedCount, BlockSize, BlockCount, LoadBufferSize, CompressionMode, SR, ThreadPool, DataFragments, ref CompressedBlockPart);
-                            Thread.Sleep(1);
+                            LoadData(ref ReadBlockcCount, ProcessedCount, BlockCount, CompressionMode, SR, ThreadPool, DataFragments, ref CompressedBlockPart, ReadBuffer);
+                            Thread.Sleep(5);
                         }
                     }
                 }
                 return "";
-            }
+        }
             catch (Exception ex)
             {
                 return ex.Message;
@@ -122,12 +140,12 @@ namespace ThreadCompressor
         /// <param name="BlockSize">Размер блока исходного файла.</param>
         /// <param name="CompressionMode">Упаковка/Распаковка.</param>
         /// <param name="ThreadPool">Пул потоков.</param>
-        private void CreateHandlers(int BlockSize, CompressionMode CompressionMode, ref ThreadHandler[] ThreadPool)
+        private void CreateHandlers(CompressionMode CompressionMode, ref ThreadHandler[] ThreadPool)
         {
-            ThreadPool = new ThreadHandler[(int)(Environment.ProcessorCount)];
+            ThreadPool = new ThreadHandler[Environment.ProcessorCount];
             for (int i = 0; i < ThreadPool.Length; i++)
             {
-                ThreadPool[i] = new ThreadHandler(CompressionMode, BlockSize);
+                ThreadPool[i] = new ThreadHandler(CompressionMode);
                 ThreadPool[i].IterEndEvent += GzWorker_IterEndEvent;
             }
         }
@@ -141,8 +159,8 @@ namespace ThreadCompressor
         {
             lock (GetDataLocker)
             {
-                CollectResult(ref ProcessedCount, handler);
-                return SetWork(ref CurrentBlockIndex, ReadBlockIndex, handler, DataFragments);
+                CollectResult(ref ProcessedCount, handler, DataFragments);
+                return SetWork(ref CurrentBlockCount, ReadBlockcCount, handler, DataFragments);
             }
         }
 
@@ -152,13 +170,11 @@ namespace ThreadCompressor
         /// <param name="BlockCount">Количество блоков в файле.</param>
         /// <param name="BlockSize">Размер блока исходного файла.</param>
         /// <param name="StreamReader">Поток чтения сжатого файла.</param>
-        private void ParseFileHeader(ref int BlockCount, ref int BlockSize, FileStream StreamReader)
+        private void ParseFileHeader(ref int BlockCount, FileStream StreamReader)
         {
-            byte[] data = new byte[8];
-            StreamReader.Read(data, 0, 8);
-            BlockSize = BitConverter.ToInt32(data, 0);
-            if (BlockSize < 1) throw new Exception("Файл поврежден.");
-            BlockCount = BitConverter.ToInt32(data, 4);
+            byte[] data = new byte[4];
+            StreamReader.Read(data, 0, 4);
+            BlockCount = BitConverter.ToInt32(data, 0);
             if (BlockCount < 1) throw new Exception("Файл поврежден.");
         }
 
@@ -169,11 +185,20 @@ namespace ThreadCompressor
         /// <param name="BlockSize">Размер блока исходного файла.</param>
         /// <param name="InputFileName">Имя исходного файла</param>
         /// <param name="StreamWriter">Поток записи сжатого файла.</param>
-        private void CreateFileHeader(ref int BlockCount, int BlockSize, string InputFileName, FileStream StreamWriter)
+        private void CreateFileHeader(ref int BlockCount, string InputFileName, FileStream StreamWriter)
         {
-            BlockCount = (int)Math.Ceiling(((double)new FileInfo(InputFileName).Length) / BlockSize);
-            StreamWriter.Write(BitConverter.GetBytes(this.BlockSize), 0, 4);
+            BlockCount = (int)Math.Ceiling(((double)new FileInfo(InputFileName).Length) / Constants.BlockSize);
             StreamWriter.Write(BitConverter.GetBytes(this.BlockCount), 0, 4);
+        }
+
+        private int GetNextFragmentIndex()
+        {
+            CurrentFragmentIndex = CurrentFragmentIndex + 1 < DataFragments.Length ? CurrentFragmentIndex + 1 : 0;
+            while (DataFragments[CurrentFragmentIndex].OriginalSize != 0)
+            {
+                FragmentRelease.WaitOne(10);
+            }
+            return CurrentFragmentIndex;
         }
 
         /// <summary>
@@ -183,21 +208,26 @@ namespace ThreadCompressor
         /// <returns>Возвращает true в случае необходимости в новой информации.</returns>
         private bool NeedMoreBlocks(int ReadBlockIndex, int ProcessedCount, ThreadHandler[] ThreadPool)
         {
-            //на всякий пожарный ограничим подкачку данных гигом оперативки
-            return Process.GetCurrentProcess().WorkingSet64 < (long)1.5 * 1024 * 1024 * 1024
-                && ReadBlockIndex < (ProcessedCount + ThreadPool.Length * 5);
+            return ReadBlockIndex < (ProcessedCount + ThreadPool.Length * 5);
         }
 
         /// <summary>
         /// Устанавливает данные, сигнализирует потокам о новых данных.
         /// </summary>
-        /// <param name="ReadBlockIndex">Индекс последнего прочитанного блока.</param>
+        /// <param name="ReadBlockCount">Индекс последнего прочитанного блока.</param>
         /// <param name="Data">Данные.</param>
         /// <param name="DataFragments">Обрабатываемые данные.</param>
-        private void SetDataToDataFragments(ref int ReadBlockIndex, byte[] Data, DataFragment[] DataFragments)
+        private unsafe void SetDataToDataFragments(ref int ReadBlockCount, int StartIndex, int OriginalSize, byte[] Data, DataFragment[] DataFragments)
         {
-            DataFragments[ReadBlockIndex] = new DataFragment() { Data = Data };
-            ReadBlockIndex++;
+            int FragmentIndex = GetNextFragmentIndex();
+
+            Array.Copy(Data, StartIndex, DataFragments[FragmentIndex].DataBuffer, 0, OriginalSize);
+
+
+
+            DataFragments[FragmentIndex].ActualBytes = Constants.BufferBlockSize;
+            DataFragments[FragmentIndex].OriginalSize = OriginalSize;
+            ReadBlockCount++;
             DataLoading.Set();
         }
 
@@ -208,73 +238,65 @@ namespace ThreadCompressor
         /// <param name="StreamReader">Поток на чтение исходного файла.</param>
         /// <param name="DataFragments">Обрабатываемые данные</param>
         /// <param name="CompressedBlockPart">Остаточная часть с буффера</param>
-        private void LoadCompressedBlock(ref int ReadBlockIndex, int LoadBufferSize, FileStream StreamReader, DataFragment[] DataFragments, ref byte[] CompressedBlockPart)
+        private void LoadCompressedBlock(ref int ReadBlockIndex, FileStream StreamReader, DataFragment[] DataFragments, ref byte[] CompressedBlockPart, byte[] ReadBuffer)
         {
-            byte[] buffer = new byte[LoadBufferSize];
-            int readed = StreamReader.Read(buffer, 0, buffer.Length);   //количество прочитанных байт, на случай если байт меньше чем буффер
-            int size = 0;                                               //размер блока
-            int index = 0;                                              //указатель на байт с которого продолжаем чтение
-            if (CompressedBlockPart != null) //Обработка остатка
+            int ReadedBytes = StreamReader.Read(ReadBuffer, 0, ReadBuffer.Length);  //количество прочитанных байт, на случай если байт меньше чем буффер
+            int OriginSize = 0;                                                     //размер блока
+            int index = 0;                                                          //указатель на байт с которого продолжаем чтение
+            if (CompressedBlockPartLength != 0) //Обработка остатка
             {
-                if (CompressedBlockPart.Length < 4) //Если остаток меньше чем размер заголовка файла (крайне маловероятно)
+                if (CompressedBlockPartLength < 4) //Если остаток меньше чем размер заголовка файла (крайне маловероятно)
                 {
-                    byte[] sizedata = new byte[4];
-                    Array.Copy(CompressedBlockPart, 0, sizedata, 0, CompressedBlockPart.Length);                                //Собираем бошку блока из двух массивов
-                    Array.Copy(buffer, 0, sizedata, CompressedBlockPart.Length, CompressedBlockPart.Length - sizedata.Length);
+                    Array.Copy(ReadBuffer, 0, CompressedBlockPart, CompressedBlockPartLength, 4 - CompressedBlockPartLength);
 
-                    index = sizedata.Length;
-                    size = BitConverter.ToInt32(sizedata, 0);
-                    byte[] block = new byte[size];
-                    Array.Copy(buffer, index, block, 0, size);
-                    index += size;
+                    index = 4 - CompressedBlockPartLength;
+                    OriginSize = BitConverter.ToInt32(CompressedBlockPart, 0);
+                    Array.Copy(ReadBuffer, index, CompressedBlockPart, 0, OriginSize);
+                    index += OriginSize;
 
-                    SetDataToDataFragments(ref ReadBlockIndex, block, DataFragments);
+                    SetDataToDataFragments(ref ReadBlockIndex, 0, OriginSize, CompressedBlockPart, DataFragments);
                 }
                 else
                 {
-                    size = BitConverter.ToInt32(CompressedBlockPart, 0);
+                    OriginSize = BitConverter.ToInt32(CompressedBlockPart, 0);
 
-                    byte[] block = new byte[size];
-                    Array.Copy(CompressedBlockPart, 4, block, 0, CompressedBlockPart.Length - 4);                               //Собираем тело блока из двух массивов
-                    Array.Copy(buffer, 0, block, CompressedBlockPart.Length - 4, size - (CompressedBlockPart.Length - 4));
-                    index = size - (CompressedBlockPart.Length - 4);
+                    Array.Copy(ReadBuffer, 0, CompressedBlockPart, CompressedBlockPartLength, OriginSize - (CompressedBlockPartLength - 4));
+                    index = OriginSize - (CompressedBlockPartLength - 4);
 
-                    SetDataToDataFragments(ref ReadBlockIndex, block, DataFragments);
+                    SetDataToDataFragments(ref ReadBlockIndex, 4, OriginSize, CompressedBlockPart, DataFragments);
                 }
             }
-            while (true)
+            while (index < ReadedBytes) 
             {
-                if (index + 4 < buffer.Length) //Если остаток буффера больше размера заголовка блока
+                if (index + 4 < ReadBuffer.Length) //Если остаток буффера больше размера заголовка блока
                 {
-                    size = BitConverter.ToInt32(buffer, index);
-                    if (size == 0) return;
+                    OriginSize = BitConverter.ToInt32(ReadBuffer, index);
+                    if (OriginSize == 0) return;
                     index += 4;
 
-                    if (size + index < buffer.Length) //Если остаток буфера больше размера тела блока
+                    if (OriginSize + index < ReadBuffer.Length) //Если остаток буфера больше размера тела блока
                     {
-                        byte[] block = new byte[size];
-                        Array.Copy(buffer, index, block, 0, block.Length);
-                        index += size;
-                        SetDataToDataFragments(ref ReadBlockIndex, block, DataFragments);
+                        SetDataToDataFragments(ref ReadBlockIndex, index, OriginSize, ReadBuffer, DataFragments);
+                        index += OriginSize;
                     }
                     else
                     {
-                        //Сохраняем остаток в CompressedBlockPart для обработки при следующем заходе
-                        CompressedBlockPart = new byte[buffer.Length - (index - 4)];
-                        Array.Copy(buffer, index - 4, CompressedBlockPart, 0, CompressedBlockPart.Length);
+                        SaveToCompressedBlockPart(CompressedBlockPart, ReadBuffer.Length - (index - 4));
                         break;
                     }
                 }
                 else
                 {
-                    //Сохраняем остаток в CompressedBlockPart для обработки при следующем заходе
-                    CompressedBlockPart = new byte[buffer.Length - (index - 4)];
-                    Array.Copy(buffer, index - 4, CompressedBlockPart, 0, CompressedBlockPart.Length);
+                    SaveToCompressedBlockPart(CompressedBlockPart, ReadBuffer.Length - (index - 4));
                     break;
                 }
             }
+            void SaveToCompressedBlockPart(byte[] CompressedBlockPt, int CompressedBlockPtLen)
+            {
+                Array.Copy(ReadBuffer, index - 4, CompressedBlockPt, 0, CompressedBlockPtLen);
+                CompressedBlockPartLength = CompressedBlockPtLen;
+            }
         }
-
         /// <summary>
         /// Загружает блок данных исходного файла.
         /// </summary>
@@ -282,15 +304,12 @@ namespace ThreadCompressor
         /// <param name="BlockSize">Размер блока исходного файла.</param>
         /// <param name="StreamReader">Поток на чтение исходного файла.</param>
         /// <param name="DataFragments">Обрабатываемые данные</param>
-        private void LoadBlock(ref int ReadBlockIndex, int BlockSize, int LoadBufferSize, FileStream StreamReader, DataFragment[] DataFragments)
+        private void LoadBlock(ref int ReadBlockIndex, FileStream StreamReader, DataFragment[] DataFragments, byte[] ReadBuffer)
         {
-            byte[] buffer = new byte[LoadBufferSize];
-            int readed = StreamReader.Read(buffer, 0, buffer.Length);
-            for (int i = 0; i < readed; i += BlockSize)
+            int ReadedBytes = StreamReader.Read(ReadBuffer, 0, ReadBuffer.Length);
+            for (int i = 0; i < ReadedBytes; i += Constants.BlockSize)
             {
-                byte[] block = i + BlockSize > readed ? new byte[readed - i] : new byte[BlockSize];
-                Array.Copy(buffer, i, block, 0, block.Length);
-                SetDataToDataFragments(ref ReadBlockIndex, block, DataFragments);
+                SetDataToDataFragments(ref ReadBlockIndex, i, Constants.BlockSize, ReadBuffer, DataFragments);
             }
         }
 
@@ -305,7 +324,7 @@ namespace ThreadCompressor
         /// <param name="ThreadPool">Пул потоков.</param>
         /// <param name="InputData">Массив данных на обработку.</param>
         /// <param name="CompressedBlockPart">Остаточная часть с буффера</param>
-        private void LoadData(ref int ReadBlockIndex, int ProcessedCount, int BlockSize, int BlockCount, int LoadBufferSize, CompressionMode CompressionMode, FileStream StreamReader, ThreadHandler[] ThreadPool, DataFragment[] InputData, ref byte[] CompressedBlockPart)
+        private void LoadData(ref int ReadBlockIndex, int ProcessedCount, int BlockCount, CompressionMode CompressionMode, FileStream StreamReader, ThreadHandler[] ThreadPool, DataFragment[] InputData, ref byte[] CompressedBlockPart, byte[] ReadBuffer)
         {
             while (NeedMoreBlocks(ReadBlockIndex, ProcessedCount, ThreadPool))
             {
@@ -313,9 +332,9 @@ namespace ThreadCompressor
                 {
                     if (CompressionMode == CompressionMode.Decompress)
                     {
-                        LoadCompressedBlock(ref ReadBlockIndex, LoadBufferSize, StreamReader, InputData, ref CompressedBlockPart);
+                        LoadCompressedBlock(ref ReadBlockIndex, StreamReader, InputData, ref CompressedBlockPart, ReadBuffer);
                     }
-                    else LoadBlock(ref ReadBlockIndex, BlockSize, LoadBufferSize, StreamReader, InputData);
+                    else LoadBlock(ref ReadBlockIndex, StreamReader, InputData, ReadBuffer);
                 }
                 else break;
             }
@@ -326,35 +345,57 @@ namespace ThreadCompressor
         /// </summary>
         /// <param name="ProcessedCount">Количество обработаных блоков.</param>
         /// <param name="Handler">Поток.</param>
-        private void CollectResult(ref int ProcessedCount, ThreadHandler Handler)
+        private void CollectResult(ref int ProcessedCount, ThreadHandler Handler, DataFragment[] DataFragments)
         {
-            if (Handler.Index > -1 && Handler.DataFragment.IsProcessed)
+            if (Handler.Index != -1)
             {
+                DataFragments[Handler.Index].ActualBytes = Handler.ActualBytes;
+                DataFragments[Handler.Index].IsProcessed = Handler.IsProcessed;
+                DataFragments[Handler.Index].OriginalSize = Handler.OriginalSize;
+
+                //DataFragments[Handler.Index].ActualBytes = IntPtr.Zero;
+                //DataFragments[Handler.Index].IsProcessed = IntPtr.Zero;
+                //DataFragments[Handler.Index].OriginalSize = IntPtr.Zero;
                 Handler.Index = -1;
                 ProcessedCount++;
+                FragmentProcessed.Set();
             }
         }
 
         /// <summary>
         /// Выставляет работу потокам.
         /// </summary>
-        /// <param name="CurrentBlockIndex">Текущий обрабатываемый блок.</param>
-        /// <param name="ReadBlockIndex">Индекс последнего прочитанного блока.</param>
+        /// <param name="CurrentBlockCount">Текущий обрабатываемый блок.</param>
+        /// <param name="ReadBlockCount">Индекс последнего прочитанного блока.</param>
         /// <param name="Handler">Поток.</param>
         /// <param name="InputData">Массив данных на обработку.</param>
-        private bool SetWork(ref int CurrentBlockIndex, int ReadBlockIndex, ThreadHandler Handler, DataFragment[] DataFragments)
+        private unsafe bool SetWork(ref int CurrentBlockCount, int ReadBlockCount, ThreadHandler Handler, DataFragment[] DataFragments)
         {
-            if (CurrentBlockIndex < ReadBlockIndex)
+            if (CurrentBlockCount < ReadBlockCount)
             {
-                if (Handler.Index == -1)
-                {
-                    Handler.Index = CurrentBlockIndex;
-                    Handler.DataFragment = DataFragments[CurrentBlockIndex];
-                    CurrentBlockIndex++;
-                    return true;
-                }
+                fixed (byte* DP = &DataFragments[FragmentIndexToCalculate].DataBuffer[0]) Handler.Data = DP;
+                //fixed (bool* Prcsd = &DataFragments[FragmentIndexToCalculate].IsProcessed) Handler.IsProcessed = Prcsd;
+                //fixed (int* OrSz = &DataFragments[FragmentIndexToCalculate].OriginalSize) Handler.OriginalSize = OrSz;
+                //fixed (int* AcB = &DataFragments[FragmentIndexToCalculate].ActualBytes) Handler.ActualBytes = AcB;
+                //Handler.Data = DataFragments[FragmentIndexToCalculate].DataBuffer;
+                Handler.ActualBytes = DataFragments[FragmentIndexToCalculate].ActualBytes;
+                Handler.OriginalSize = DataFragments[FragmentIndexToCalculate].OriginalSize;
+                Handler.IsProcessed = DataFragments[FragmentIndexToCalculate].IsProcessed;
+
+                Handler.Index = FragmentIndexToCalculate;
+
+                CurrentBlockCount++;
+                FragmentIndexToCalculate = FragmentIndexToCalculate + 1 < DataFragments.Length ? FragmentIndexToCalculate + 1 : 0;
+                return true;
             }
-            else  DataLoading.WaitOne(5); 
+            else 
+            {
+                //Stopwatch w = Stopwatch.StartNew();
+                DataLoading.WaitOne(5);
+                //w.Stop();
+                //Console.WriteLine(w.Elapsed);
+                //w = null;
+            }
             return false;
         }
 
@@ -364,47 +405,67 @@ namespace ThreadCompressor
         /// <param name="InputWriter">Поток на чтение в выходной файл.</param>
         private void WriteResultInFile(object InputWriter)
         {
-            FileStream StreamWriter = (FileStream)InputWriter;
-            while (WriteBlockIndex != BlockCount)
+            while (WriteBlockCount != BlockCount)
             {
-                int count = 0;                                      //Количество блоков подготавливаемых к записи
-                int start = WriteBlockIndex;                        //Начиная с блока
-                int bytes = 0;                                      //Количество байт на запись
-
-                while (count < 50                                   //Защита жора оперативы, количество на запись не больше 50
-                    && start + count != BlockCount                  //Не выходим за рамки массива данными
-                    && DataFragments[start + count] != null         //Фрагмент данных существует
-                    && DataFragments[start + count].IsProcessed)    //Блок обсчитан
+                if (DataFragments[CurrentFragmentToWriteIndex].IsProcessed)
                 {
-                    //Собираем информацию о блоках идущих на запись в диск
-                    if (CompressionMode == CompressionMode.Compress) bytes += 4; 
-                    bytes += DataFragments[start + count].Data.Length;
-                    count++;
+                    if (CompressionMode == CompressionMode.Compress) ((FileStream)InputWriter).Write(BitConverter.GetBytes(DataFragments[CurrentFragmentToWriteIndex].ActualBytes), 0, 4);
+                    ((FileStream)InputWriter).Write(DataFragments[CurrentFragmentToWriteIndex].DataBuffer, 0, DataFragments[CurrentFragmentToWriteIndex].ActualBytes);
+                    DataFragments[CurrentFragmentToWriteIndex].IsProcessed = false;
+                    DataFragments[CurrentFragmentToWriteIndex].ActualBytes = 0;
+                    DataFragments[CurrentFragmentToWriteIndex].OriginalSize = 0;
+                    CurrentFragmentToWriteIndex = CurrentFragmentToWriteIndex + 1 < DataFragments.Length ? CurrentFragmentToWriteIndex + 1 : 0;
+                    WriteBlockCount++;
+                    FragmentRelease.Set();
                 }
-                byte[] data = new byte[bytes];                      //Буффер на запись
-                int crntbyte = 0;                                   //Указатель на текущий байт
-                for (int i = 0; i < count; i++)
-                {
-                    //Забиваем буффер данными
-                    if (CompressionMode == CompressionMode.Compress)
-                    {
-                        Array.Copy(BitConverter.GetBytes(DataFragments[i + start].Data.Length), 0, data, crntbyte, 4);
-                        crntbyte += 4;
-                    }
-                    Array.Copy(DataFragments[start + i].Data, 0, data, crntbyte, DataFragments[start + i].Data.Length);
-                    crntbyte += DataFragments[start + i].Data.Length;
-                    DataFragments[start + i] = null;
-                }
-                if (data.Length > 0)//Если буфер не пустой 
-                { 
-                    //Пишем в файл
-                    StreamWriter.Write(data, 0, data.Length); 
-                    StreamWriter.Flush();
-                    WriteBlockIndex += count;
-                }
-                Thread.Sleep(250 / ThreadPool.Length);
-                GC.Collect();
+                else FragmentProcessed.WaitOne(1);
             }
+
+
+            //while (WriteBlockCount != BlockCount)
+            //{
+            //    int BlockCount = 0;     //Количество блоков подготавливаемых к записи
+            //    int TotalBytes = 0;     //Количество байт на запись
+
+
+            //    while (BlockCount < Constants.MaxWriteBlocks                                                                        //Ограничиваем количество данных за раз
+            //        && WriteBlockCount + BlockCount != this.BlockCount                                                              //Не выходим за рамки массива данными
+            //        && DataFragments[(CurrentFragmentToWriteIndex + BlockCount) % DataFragments.Length].IsProcessed)                 //Фрагмент обработан
+            //    {
+            //        //Собираем информацию о блоках идущих на запись в диск
+            //        if (CompressionMode == CompressionMode.Compress) TotalBytes += 4;
+            //        TotalBytes += DataFragments[(CurrentFragmentToWriteIndex + BlockCount) % DataFragments.Length].ActualBytes;
+            //        BlockCount++;
+            //    }
+
+            //    int CurrentByte = 0;    //Указатель на текущий байт
+
+            //    for (int i = 0; i < BlockCount; i++)
+            //    {
+            //        //Забиваем буффер данными
+            //        if (CompressionMode == CompressionMode.Compress)
+            //        {
+            //            Array.Copy(BitConverter.GetBytes(DataFragments[CurrentFragmentToWriteIndex].ActualBytes), 0, WriteBuffer, CurrentByte, 4);
+            //            CurrentByte += 4;
+            //        }
+
+            //        Array.Copy(DataFragments[CurrentFragmentToWriteIndex].DataBuffer, 0, WriteBuffer, CurrentByte, DataFragments[CurrentFragmentToWriteIndex].ActualBytes);
+
+            //        DataFragments[CurrentFragmentToWriteIndex].IsProcessed = false;
+            //        DataFragments[CurrentFragmentToWriteIndex].ActualBytes = 0;
+            //        DataFragments[CurrentFragmentToWriteIndex].OriginalSize = 0;
+            //        FragmentRelease.Set();
+            //        CurrentFragmentToWriteIndex = CurrentFragmentToWriteIndex + 1 < DataFragments.Length ? CurrentFragmentToWriteIndex + 1 : 0;
+            //    }
+            //    if (TotalBytes > 0)//Если буфер не пустой 
+            //    {
+            //        //Пишем в файл
+            //        ((FileStream)InputWriter).Write(WriteBuffer, 0, TotalBytes);
+            //        ((FileStream)InputWriter).Flush();
+            //        WriteBlockCount += BlockCount;
+            //    }
+            //    Thread.Sleep(500 / ThreadPool.Length);
+            //}
         }
 
         /// <summary>
@@ -413,10 +474,10 @@ namespace ThreadCompressor
         /// <param name="BlockSize">Размер блока исходного файла.</param>
         /// <param name="BlockCount">Количество блоков в файле.</param>
         /// <param name="OutputFileName">Имя выходного файла.</param>
-        private void CheckFreeSpaceForDecompress(int BlockSize, int BlockCount, string OutputFileName)
+        private void CheckFreeSpaceForDecompress(int BlockCount, string OutputFileName)
         {
             var Drive = DriveInfo.GetDrives().Where(x => x.Name == Path.GetPathRoot(new FileInfo(OutputFileName).FullName)).FirstOrDefault();
-            if (Drive != null && Drive.AvailableFreeSpace < (long)BlockSize * (long)BlockCount)
+            if (Drive != null && Drive.AvailableFreeSpace < (long)Constants.BlockSize * BlockCount)
                 throw new Exception("Недостаточно места на жестком диске для распаковки.");
         }
     }

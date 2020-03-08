@@ -3,15 +3,23 @@
     /// <summary>
     /// Блок данных
     /// </summary>
-    public class DataFragment
+    public struct DataFragment
     {
+        /// <summary>
+        /// Обработано
+        /// </summary>
+        public bool IsProcessed;
+        /// <summary>
+        /// Количество байт на запись.
+        /// </summary>
+        public int ActualBytes;
+        /// <summary>
+        /// Размер после вычислений
+        /// </summary>
+        public int OriginalSize;
         /// <summary>
         /// Данные.
         /// </summary>
-        public byte[] Data { get; set; }
-        /// <summary>
-        /// Если данные обработаны true.
-        /// </summary>
-        public bool IsProcessed { get; set; }
+        public byte[] DataBuffer;
     }
 }

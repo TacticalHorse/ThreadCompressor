@@ -1,6 +1,7 @@
 ﻿using System;
 using System.IO;
 using System.IO.Compression;
+using System.Runtime.InteropServices;
 using System.Threading;
 
 namespace ThreadCompressor
@@ -8,7 +9,7 @@ namespace ThreadCompressor
     /// <summary>
     /// Обрабочик блоков данных
     /// </summary>
-    class ThreadHandler
+    unsafe class ThreadHandler
     {
         /// <summary>
         /// Делегат для запроса нового задания.
@@ -17,7 +18,7 @@ namespace ThreadCompressor
         /// <returns>Должен вернуть true в случае выдачи нового задания.</returns>
         public delegate bool IterEnd(ThreadHandler handler);
         /// <summary>
-        /// Вызывается после обработки <see cref="DataFragment"/> для сбора результата, и выдачи нового задания.
+        /// Вызывается после обработки массива данных, регистрации выполнения, и выдачи нового задания.
         /// Если новое задание выдано, возвращает true.
         /// </summary>
         public event IterEnd IterEndEvent;
@@ -30,37 +31,49 @@ namespace ThreadCompressor
         /// </summary>
         private Thread Thread;
         /// <summary>
-        /// Исходный размер блока.
-        /// </summary>
-        private int BlockSize = -1;
-        /// <summary>
         /// Компрессия/декомпрессия.
         /// </summary>
         private CompressionMode Mode;
 
+
+        /// <summary>
+        /// Обработано
+        /// </summary>
+        public bool IsProcessed;
+        /// <summary>
+        /// Количество байт на запись.
+        /// </summary>
+        public int ActualBytes;
+        /// <summary>
+        /// Исходный размер
+        /// </summary>
+        public int OriginalSize;
+        /// <summary>
+        /// Указатель на фиксированный массив данных.
+        /// </summary>
+        public byte* Data;
+
         /// <summary>
         /// Индекс обрабатываемого блока.
         /// </summary>
-        public long Index = -1;
+        public long Index;
 
-        /// <summary>
-        /// Текущий обрабатываемый фрагмент.
-        /// </summary>
-        public DataFragment DataFragment;
+        private byte[] TmpArray;
 
         /// <summary>
         /// Создает обработчик, и запускает поток обработки данных.
         /// </summary>
         /// <param name="Mode">Режим обработки</param>
         /// <param name="BlockSize">Размер блока на компрессию</param>
-        public ThreadHandler(CompressionMode Mode, int BlockSize = 1024 * 1024)
+        public ThreadHandler(CompressionMode Mode)
         {
-            if (BlockSize < 1024) throw new Exception("Размер блока не может быть меньше 1024 байт");
             IsWork = true;
             this.Mode = Mode;
-            this.BlockSize = BlockSize;
             Thread = new Thread(Work);
+            Thread.Priority = ThreadPriority.Highest;
             Thread.Start();
+
+            TmpArray = new byte[Constants.BufferBlockSize];
         }
 
         private void Work()
@@ -71,28 +84,33 @@ namespace ThreadCompressor
                 {
                     if (Mode == CompressionMode.Compress)
                     {
-                        using (MemoryStream Output = new MemoryStream())
+                        //using (MemoryStream Output = new MemoryStream(Data))
+                        using (UnmanagedMemoryStream Output = new UnmanagedMemoryStream(Data, Constants.BlockSize, Constants.BufferBlockSize, FileAccess.Write))
                         {
+                            //Array.Copy(Data, 0, TmpArray, 0, Constants.BlockSize);
+                            Marshal.Copy((IntPtr)Data, TmpArray, 0, Constants.BlockSize);
                             using (GZipStream gzstream = new GZipStream(Output, CompressionMode.Compress))
                             {
-                                gzstream.Write(DataFragment.Data, 0, DataFragment.Data.Length);
+                                gzstream.Write(TmpArray, 0, TmpArray.Length);
                             }
-                            //Для сжатого участка отрезаем пустые байты
-                            DataFragment.Data = CutEmptyPart(Output.GetBuffer(),10);
+                            //IndexOfFileTale(Data, 0, Constants.BufferBlockSize, 15, ref ActualBytes);
+                            IndexOfFileTale(Data, 0, Constants.BufferBlockSize, 15, ref ActualBytes);
                         }
                     }
                     else
                     {
-                        byte[] DecompressedData = new byte[BlockSize];
-                        int ReadedBytes = 0; //Размер последнего блока будет отличаться от BlockSize
-                        using (GZipStream gzstream = new GZipStream(new MemoryStream(DataFragment.Data), CompressionMode.Decompress))
+                        //Marshal.Copy((IntPtr)Data, TmpArray, 0, Constants.BlockSize);
+                        using (UnmanagedMemoryStream Output = new UnmanagedMemoryStream(Data, ActualBytes, Constants.BufferBlockSize, FileAccess.Read))
                         {
-                            ReadedBytes = gzstream.Read(DecompressedData, 0, DecompressedData.Length);
+                            using (GZipStream gzstream = new GZipStream(Output, CompressionMode.Decompress))
+                            {
+                                ActualBytes = gzstream.Read(TmpArray, 0, Constants.BlockSize);
+                            }
+                            Marshal.Copy(TmpArray, 0, (IntPtr)Data, ActualBytes);
                         }
-                        if (ReadedBytes != BlockSize) Array.Resize(ref DecompressedData, ReadedBytes); //Потому подтверждаем размер блока
-                        DataFragment.Data = DecompressedData;
                     }
-                    DataFragment.IsProcessed = true;
+                    //IsProcessed = true;
+                    IsProcessed = true;
                 }
             }
         }
@@ -106,20 +124,6 @@ namespace ThreadCompressor
         }
 
         /// <summary>
-        /// Срезаем хвосты блоков
-        /// </summary>
-        /// <param name="Input">Обрабатываемый массив</param>
-        /// <param name="Deep">Глубина поиска.</param>
-        /// <returns>Стриженый массив.</returns>
-        private byte[] CutEmptyPart(byte[] Input, int Deep)
-        {
-            int Index = -1;
-            IndexOfFileTale(Input, 0, Input.Length - 1, Deep, ref Index);
-            if (Index > -1) Array.Resize(ref Input, Index);
-            return Input;
-        }
-
-        /// <summary>
         /// Ищем конец сжатого блока
         /// </summary>
         /// <param name="InputArray">Проверяемый массив</param>
@@ -127,16 +131,22 @@ namespace ThreadCompressor
         /// <param name="End">Конец просмативаемого отрезка</param>
         /// <param name="Deep">Количество рекурсионных вызовов функции</param>
         /// <param name="Index">Индекс конца блока</param>
-        private void IndexOfFileTale(byte[] InputArray, int Start, int End, int Deep, ref int Index)
+        //private void IndexOfFileTale(byte* InputArray, int Start, int End, int Deep, ref int* Index)
+        //private void IndexOfFileTale(byte[] InputArray, int Start, int End, int Deep, int Index)
+        private void IndexOfFileTale(byte* InputArray, int Start, int End, int Deep, ref int Index)
         {
             if (Deep == 0) return;
             int Сenter = (End + Start) / 2;
+            //if (InputArray[Сenter] == 0x00 && InputArray[Сenter + 1] == 0x00)
             if (InputArray[Сenter] == 0x00 && InputArray[Сenter + 1] == 0x00)
             {
+                //*Index = Сenter;
                 Index = Сenter;
+                //IndexOfFileTale(InputArray, Start, Сenter, Deep - 1, Index);
                 IndexOfFileTale(InputArray, Start, Сenter, Deep - 1, ref Index);
             }
             else IndexOfFileTale(InputArray, Сenter, End, Deep - 1, ref Index);
+            //else IndexOfFileTale(InputArray, Сenter, End, Deep - 1, Index);
         }
     }
 }
