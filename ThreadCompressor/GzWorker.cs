@@ -371,8 +371,8 @@ namespace ThreadCompressor
         {
             if (CurrentBlockCount < ReadBlockCount)
             {
-                fixed (byte* DP = &DataFragments[FragmentIndexToCalculate].DataBuffer[0]) { Handler.Data = DP; }
-                //Handler.Data = DataFragments[FragmentIndexToCalculate].DataBuffer;
+                //fixed (byte* DP = &DataFragments[FragmentIndexToCalculate].DataBuffer[0]) { Handler.Data = DP; }
+                Handler.Data = DataFragments[FragmentIndexToCalculate].DataBuffer;
                 Handler.ActualBytes = DataFragments[FragmentIndexToCalculate].ActualBytes;
                 Handler.OriginalSize = DataFragments[FragmentIndexToCalculate].OriginalSize;
                 Handler.IsProcessed = DataFragments[FragmentIndexToCalculate].IsProcessed;

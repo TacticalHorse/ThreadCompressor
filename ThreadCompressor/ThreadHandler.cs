@@ -43,7 +43,7 @@ namespace ThreadCompressor
         /// <summary>
         /// Указатель на массив данных.
         /// </summary>
-        public byte* Data;
+        public byte[] Data;
         /// <summary>
         /// Индекс обрабатываемого блока.
         /// </summary>
@@ -84,25 +84,34 @@ namespace ThreadCompressor
                 {
                     if (Mode == CompressionMode.Compress)
                     {
-                        using (UnmanagedMemoryStream Output = new UnmanagedMemoryStream(Data, Constants.BufferBlockSize, Constants.BufferBlockSize, FileAccess.Write))
+                        fixed(byte* datP = &Data[0])
                         {
-                            Marshal.Copy((IntPtr)Data, TmpArray, 0, Constants.BufferBlockSize);                         //Преписываем полностью, затирая старый мусор
-                            Marshal.Copy(Constants.EmptyData, 0, (IntPtr)Data, Constants.EmptyData.Length);             //Чистим исходный массив
-                            using (GZipStream gzstream = new GZipStream(Output, CompressionMode.Compress))
-                            { gzstream.Write(TmpArray, 0, OriginalSize); }
+                            using (UnmanagedMemoryStream Output = new UnmanagedMemoryStream(datP, Constants.BufferBlockSize, Constants.BufferBlockSize, FileAccess.Write))
+                            {
+                                Marshal.Copy((IntPtr)datP, TmpArray, 0, Constants.BufferBlockSize);                         //Преписываем полностью, затирая старый мусор
+                                Marshal.Copy(Constants.EmptyData, 0, (IntPtr)datP, Constants.EmptyData.Length);             //Чистим исходный массив
+                                
+                                using (GZipStream gzstream = new GZipStream(Output, CompressionMode.Compress))
+                                { 
+                                    gzstream.Write(TmpArray, 0, OriginalSize);
+                                }
+                            }
+                            IndexOfFileTale(datP, 0, Constants.BufferBlockSize, 15, ref ActualBytes);
                         }
-                        IndexOfFileTale(Data, 0, Constants.BufferBlockSize, 15, ref ActualBytes);                       //Индекс хвоста, можно и больше но смысла мало. При блоке в 8мб точность 256 байт
                     }
                     else
                     {
-                        using (UnmanagedMemoryStream Output = new UnmanagedMemoryStream(Data, OriginalSize, Constants.BufferBlockSize, FileAccess.Read))
+                        fixed (byte* datP = &Data[0])
                         {
-                            using (GZipStream gzstream = new GZipStream(Output, CompressionMode.Decompress))
+                            using (UnmanagedMemoryStream Output = new UnmanagedMemoryStream(datP, OriginalSize, Constants.BufferBlockSize, FileAccess.Read))
                             {
-                                ActualBytes = gzstream.Read(TmpArray, 0, Constants.BlockSize);
+                                using (GZipStream gzstream = new GZipStream(Output, CompressionMode.Decompress))
+                                {
+                                    ActualBytes = gzstream.Read(TmpArray, 0, Constants.BlockSize);
+                                }
                             }
+                            Marshal.Copy(TmpArray, 0, (IntPtr)datP, ActualBytes);
                         }
-                        Marshal.Copy(TmpArray, 0, (IntPtr)Data, ActualBytes);
                     }
                     IsProcessed = true;
                 }
@@ -127,26 +136,33 @@ namespace ThreadCompressor
         /// <param name="Index">Индекс конца блока</param>
         private void IndexOfFileTale(byte* InputArray, int Start, int End, int Deep, ref int Index)
         {
-            long* ptr;
-            int Center;
-            while (Deep > 0)
-            {
-                Center = (End + Start) / 2;
+            //long* ptr;
+            //int Center;
+            //while (Deep > 0)
+            //{
+            //    Center = (End + Start) / 2;
 
-                ptr = (long*)(&InputArray[Center]);     //Тестил на видосике, хватало чтобы сохранить целостность файла.
-                if (ptr[-3] == 0L
-                   && ptr[-2] == 0L
-                   && ptr[-1] == 0L
-                   && ptr[0] == 0L
-                   && ptr[1] == 0L
-                   && ptr[2] == 0L)
-                {
-                    Index = Center;
-                    End = Center;
-                }
-                else Start = Center;
-                Deep--;
+            //    ptr = (long*)(&InputArray[Center]);
+            //    if (ptr[-3] == 0L
+            //       && ptr[-2] == 0L
+            //       && ptr[-1] == 0L
+            //       && ptr[0] == 0L
+            //       && ptr[1] == 0L
+            //       && ptr[2] == 0L)
+            //    {
+            //        Index = Center;
+            //        End = Center;
+            //    }
+            //    else Start = Center;
+            //    Deep--;
+            //}
+
+
+            while (InputArray[End] == 0x00)
+            {
+                End--;
             }
+            Index = End;
         }
     }
 }
