@@ -9,8 +9,6 @@ namespace ThreadCompressor
     {
         static int Main(string[] args)
         {
-            Stopwatch s = Stopwatch.StartNew();
-
             GzWorker a = null;
             Console.Clear();
             string res = "";
@@ -30,10 +28,7 @@ namespace ThreadCompressor
                 }
             }
             else res = "Неверно заданы аргументы.";
-            s.Stop();
-            Console.WriteLine(s.Elapsed);
             Console.WriteLine(string.IsNullOrEmpty(res) ? "OK" : res);
-            Console.ReadLine();
             return string.IsNullOrEmpty(res) ? 0 : 1;
         }
     }

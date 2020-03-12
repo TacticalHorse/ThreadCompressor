@@ -96,7 +96,7 @@ namespace ThreadCompressor
                                     gzstream.Write(TmpArray, 0, OriginalSize);
                                 }
                             }
-                            IndexOfFileTale(datP, 0, Constants.BufferBlockSize, 15, ref ActualBytes);
+                            IndexOfFileTale(datP, Constants.BufferBlockSize, ref ActualBytes);
                         }
                     }
                     else
@@ -130,34 +130,10 @@ namespace ThreadCompressor
         /// Ищем конец сжатого блока
         /// </summary>
         /// <param name="InputArray">Проверяемый массив</param>
-        /// <param name="Start">Начало просматриваемого отрезка</param>
         /// <param name="End">Конец просмативаемого отрезка</param>
-        /// <param name="Deep">Глубина поиска</param>
         /// <param name="Index">Индекс конца блока</param>
-        private void IndexOfFileTale(byte* InputArray, int Start, int End, int Deep, ref int Index)
+        private void IndexOfFileTale(byte* InputArray, int End, ref int Index)
         {
-            //long* ptr;
-            //int Center;
-            //while (Deep > 0)
-            //{
-            //    Center = (End + Start) / 2;
-
-            //    ptr = (long*)(&InputArray[Center]);
-            //    if (ptr[-3] == 0L
-            //       && ptr[-2] == 0L
-            //       && ptr[-1] == 0L
-            //       && ptr[0] == 0L
-            //       && ptr[1] == 0L
-            //       && ptr[2] == 0L)
-            //    {
-            //        Index = Center;
-            //        End = Center;
-            //    }
-            //    else Start = Center;
-            //    Deep--;
-            //}
-
-
             while (InputArray[End] == 0x00)
             {
                 End--;
