@@ -6,6 +6,10 @@ namespace ThreadCompressor
 {
     public static class Tools
     {
+        /// <summary>
+        /// Получаем хешу файла.
+        /// </summary>
+        /// <param name="FileName"></param>
         public static void GetHash(string FileName)
         {
             using (var md5 = MD5.Create())
@@ -18,9 +22,14 @@ namespace ThreadCompressor
             }
         }
 
-
+        /// <summary>
+        /// Создание файла 
+        /// </summary>
+        /// <param name="Size">Размер файла в байтах</param>
+        /// <param name="FileName">Имя</param>
         public static void CreateFile(long Size, string FileName)
         {
+            //базовый блок 32МБ
             byte[] basePart = new byte[32*1024*1024];
             new Random().NextBytes(basePart);
 
